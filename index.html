@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Email Account Organizer</title>
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self' https://www.gstatic.com https://cdnjs.cloudflare.com; script-src 'self' 'unsafe-inline' https://www.gstatic.com; style-src 'self' 'unsafe-inline'; connect-src 'self' https://*.firebaseapp.com https://*.googleapis.com">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>📧 Email Account Organizer</h1>
+        </header>
+
+        <!-- Search Section -->
+        <div class="search-section">
+            <h3>Search Accounts</h3>
+            <div class="search-controls">
+                <div class="search-inputs">
+                    <input type="text" id="emailSearchInput" placeholder="Search by email..." />
+                    <input type="date" id="dateSearchInput" placeholder="Search by date" />
+                    <input type="text" id="clientSearchInput" placeholder="Search by client..." />
+                </div>
+                <div class="search-buttons">
+                    <button id="searchBtn" class="btn btn-primary">Search</button>
+                    <button id="clearSearchBtn" class="btn btn-secondary">Clear</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Order Number Search Section -->
+        <div class="order-search-section">
+            <h3>Search by Order Number</h3>
+            <div class="search-controls">
+                <div class="search-inputs">
+                    <input type="text" id="orderSearchInput" placeholder="Search by order number..." />
+                </div>
+                <div class="search-buttons">
+                    <button id="orderSearchBtn" class="btn btn-primary">Search Orders</button>
+                    <button id="clearOrderSearchBtn" class="btn btn-secondary">Clear</button>
+                </div>
+            </div>
+            <div id="orderResults" class="order-results"></div>
+        </div>
+
+        <!-- Export Section -->
+        <div class="export-section">
+            <h3>Export Data</h3>
+            <div class="export-buttons">
+                <button id="exportCSVBtn" class="btn btn-success">Export CSV</button>
+                <button id="exportExcelBtn" class="btn btn-success">Export Excel</button>
+                <button id="exportJSONBtn" class="btn btn-success">Export JSON</button>
+            </div>
+        </div>
+
+        <!-- Search Results -->
+        <div id="searchResults" class="search-results" style="display: none;">
+            <h3>Search Results <span id="resultCount"></span></h3>
+            <div class="table-container">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Client</th>
+                            <th>Email</th>
+                            <th>Expiration Date</th>
+                            <th>Order Numbers</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="searchResultsBody"></tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Expiring Accounts -->
+        <section class="expiring-section">
+            <h2>⚠️ Accounts Expiring Tomorrow</h2>
+            <div class="table-container">
+                <table id="expiringTable">
+                    <thead>
+                        <tr>
+                            <th>Client</th>
+                            <th>Email</th>
+                            <th>Expiration Date</th>
+                            <th>Order Numbers</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="expiringTableBody"></tbody>
+                </table>
+                <div id="noExpiringAccounts" class="no-data" style="display: none;">
+                    No accounts expiring tomorrow
+                </div>
+            </div>
+        </section>
+
+        <!-- Accounts Section -->
+        <section class="accounts-section">
+            <h2>📋 All Accounts by Client</h2>
+            <div id="clientsContainer"></div>
+            
+            <!-- Add Client -->
+            <div class="add-client-section">
+                <button id="addClientBtn" class="btn btn-primary">+ Add New Client</button>
+                <div id="newClientForm" class="new-client-form" style="display: none;">
+                    <input type="text" id="newClientName" placeholder="Enter client name">
+                    <button id="saveClientBtn" class="btn btn-success">Save</button>
+                    <button id="cancelClientBtn" class="btn btn-secondary">Cancel</button>
+                </div>
+            </div>
+        </section>
+    </div>
+
+    <!-- Bulk Upload Modal -->
+    <div id="bulkUploadModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Bulk Upload Emails</h3>
+                <span class="close">&times;</span>
+            </div>
+            <div class="modal-body">
+                <p>Paste emails (one per line). Format:</p>
+                <pre><code>email@example.com</code> or <code>email@example.com,2025-12-31</code> or <code>email@example.com,2025-12-31,order1,order2,order3</code></pre>
+                <textarea id="bulkEmailInput" placeholder="email1@example.com&#10;email2@example.com,2025-01-15,order123,order456&#10;email3@example.com,,,order789"></textarea>
+                <div class="modal-actions">
+                    <button id="processBulkUpload" class="btn btn-primary">Upload Emails</button>
+                    <button id="cancelBulkUpload" class="btn btn-secondary">Cancel</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Confirmation Modal -->
+    <div id="confirmModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-body">
+                <p id="confirmMessage">Are you sure?</p>
+                <div class="modal-actions">
+                    <button id="confirmYes" class="btn btn-danger">Yes</button>
+                    <button id="confirmNo" class="btn btn-secondary">No</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Loading Spinner -->
+    <div id="loadingSpinner" class="loading-spinner">
+        <div class="spinner"></div>
+        <p>Loading...</p>
+    </div>
+
+    <!-- Firebase SDKs (official Google CDN) -->
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
+
+    <script src="script.js"></script>
+</body>
+</html>
