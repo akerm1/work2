@@ -887,56 +887,32 @@ function cancelNewAccount(button) {
 
 function editAccount(id) {
     const account = accounts.find(acc => acc.id === id);
-    if (!account) return;
-
-    // Force expand the client section so the account row is visible
-    expandedClients.add(account.client);
-
-    if (isSearchActive) {
-        document.getElementById('searchResults').style.display = 'none';
-        isSearchActive = false; // Turn off search mode
-        renderAccounts(); // Re-render main UI with client expanded
-
-        // Use setTimeout to wait for the DOM to update after renderAccounts()
-        setTimeout(() => {
-            const row = document.querySelector(`tr[data-id="${id}"]`);
-            if (!row) {
-                console.error(`Could not find row for account ID: ${id}`);
-                showMessage('Could not find account to edit. Please try again.', 'error');
-                return;
-            }
-
-            enterEditMode(row, account);
-        }, 0);
-    } else {
-        // Normal case: editing from main UI
-        const row = document.querySelector(`tr[data-id="${id}"]`);
-        if (!row) {
-            console.error(`Could not find row for account ID: ${id}`);
-            showMessage('Could not find account to edit. Please try again.', 'error');
-            return;
-        }
-
-        enterEditMode(row, account);
+    if (!account) {
+        showMessage('Account not found', 'error');
+        return;
     }
-}
 
-// Helper function to DRY up the edit mode logic
-function enterEditMode(row, account) {
-    const emailCell = row.querySelector('.email-cell');
-    const dateCell = row.querySelector('.date-cell');
-    const ordersCell = row.querySelector('.orders-cell');
-    const actionsCell = row.querySelector('.actions-cell');
+    // Find the row in the SEARCH RESULTS table
+    const row = document.querySelector(`#searchResultsBody tr[data-id="${id}"]`);
+    if (!row) {
+        showMessage('Could not find account row to edit', 'error');
+        return;
+    }
+
+    const emailCell = row.querySelector('td:nth-child(2)'); // Email is 2nd column in search results
+    const dateCell = row.querySelector('td:nth-child(3)');  // Date is 3rd column
+    const ordersCell = row.querySelector('td:nth-child(4)'); // Orders is 4th column
+    const actionsCell = row.querySelector('td:nth-child(5)'); // Actions is 5th column
 
     emailCell.innerHTML = `<input type="email" class="edit-email" value="${escapeHtml(account.email)}">`;
     dateCell.innerHTML = `<input type="date" class="edit-date" value="${account.date}">`;
-    ordersCell.innerHTML = renderOrderInputs(account.orderNumbers, account.id);
+    ordersCell.innerHTML = renderOrderInputs(account.orderNumbers, id);
     actionsCell.innerHTML = `
         <div class="action-buttons">
-            <button class="btn btn-success btn-small" onclick="saveAccountEdit('${account.id}')">
+            <button class="btn btn-success btn-small" onclick="saveAccountEdit('${id}')">
                 Save
             </button>
-            <button class="btn btn-secondary btn-small" onclick="cancelAccountEdit('${account.id}')">
+            <button class="btn btn-secondary btn-small" onclick="cancelAccountEdit('${id}')">
                 Cancel
             </button>
         </div>
@@ -947,22 +923,27 @@ function enterEditMode(row, account) {
 }
 
 async function saveAccountEdit(id) {
-    const row = document.querySelector(`tr[data-id="${id}"]`);
+    // Find the row in the SEARCH RESULTS table
+    const row = document.querySelector(`#searchResultsBody tr[data-id="${id}"]`);
+    if (!row) {
+        showMessage('Could not find account row to save', 'error');
+        return;
+    }
+
     const email = row.querySelector('.edit-email').value.trim();
     const date = row.querySelector('.edit-date').value;
     const orderInputs = row.querySelectorAll('.order-input');
     const orderNumbers = Array.from(orderInputs).map(input => sanitizeOrderNumber(input.value));
-    
+
     if (!email || !validateEmail(email)) {
         showMessage('Please enter a valid email address', 'error');
         return;
     }
-    
     if (!validateDate(date)) {
         showMessage('Please enter a valid date', 'error');
         return;
     }
-    
+
     try {
         showLoading();
         const account = accounts.find(acc => acc.id === id);
@@ -972,19 +953,16 @@ async function saveAccountEdit(id) {
             date: date || getTodayFormatted(),
             orderNumbers: orderNumbers
         };
-        
         await updateAccount(id, updatedData);
-        
         Object.assign(account, updatedData);
-        
         hideLoading();
         showMessage('Account updated successfully');
-        renderAccounts();
-        renderExpiringAccounts();
         
-        if (isSearchActive) {
-            performSearch();
-        }
+        // Re-render only the search results to reflect the changes
+        renderSearchResults();
+        
+        // Also update the main accounts list and expiring accounts for consistency
+        renderExpiringAccounts();
     } catch (error) {
         hideLoading();
         showMessage('Error updating account', 'error');
@@ -993,15 +971,8 @@ async function saveAccountEdit(id) {
 }
 
 function cancelAccountEdit(id) {
-    renderAccounts();
-    renderExpiringAccounts();
-}
-
-function confirmDeleteAccount(id) {
-    const account = accounts.find(acc => acc.id === id);
-    showConfirmModal(`Are you sure you want to delete ${account.email}?`, () => {
-        deleteAccountConfirmed(id);
-    });
+    // Simply re-render the search results to go back to view mode
+    renderSearchResults();
 }
 
 async function deleteAccountConfirmed(id) {
