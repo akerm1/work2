@@ -889,22 +889,40 @@ function editAccount(id) {
     const account = accounts.find(acc => acc.id === id);
     if (!account) return;
 
-    // NEW CODE: If coming from search, ensure the client section is expanded in main UI
-    expandedClients.add(account.client); // Force expand the client section
+    // Force expand the client section so the account row is visible
+    expandedClients.add(account.client);
 
     if (isSearchActive) {
         document.getElementById('searchResults').style.display = 'none';
-        renderAccounts(); // Re-render main UI with the client now expanded
-    }
+        isSearchActive = false; // Turn off search mode
+        renderAccounts(); // Re-render main UI with client expanded
 
-    // Now find the row in the (now expanded and re-rendered) main UI
-    const row = document.querySelector(`tr[data-id="${id}"]`);
-    if (!row) {
-        console.error(`Could not find row for account ID: ${id}`);
-        showMessage('Could not find account to edit. Please try again.', 'error');
-        return;
-    }
+        // Use setTimeout to wait for the DOM to update after renderAccounts()
+        setTimeout(() => {
+            const row = document.querySelector(`tr[data-id="${id}"]`);
+            if (!row) {
+                console.error(`Could not find row for account ID: ${id}`);
+                showMessage('Could not find account to edit. Please try again.', 'error');
+                return;
+            }
 
+            enterEditMode(row, account);
+        }, 0);
+    } else {
+        // Normal case: editing from main UI
+        const row = document.querySelector(`tr[data-id="${id}"]`);
+        if (!row) {
+            console.error(`Could not find row for account ID: ${id}`);
+            showMessage('Could not find account to edit. Please try again.', 'error');
+            return;
+        }
+
+        enterEditMode(row, account);
+    }
+}
+
+// Helper function to DRY up the edit mode logic
+function enterEditMode(row, account) {
     const emailCell = row.querySelector('.email-cell');
     const dateCell = row.querySelector('.date-cell');
     const ordersCell = row.querySelector('.orders-cell');
@@ -912,13 +930,13 @@ function editAccount(id) {
 
     emailCell.innerHTML = `<input type="email" class="edit-email" value="${escapeHtml(account.email)}">`;
     dateCell.innerHTML = `<input type="date" class="edit-date" value="${account.date}">`;
-    ordersCell.innerHTML = renderOrderInputs(account.orderNumbers, id);
+    ordersCell.innerHTML = renderOrderInputs(account.orderNumbers, account.id);
     actionsCell.innerHTML = `
         <div class="action-buttons">
-            <button class="btn btn-success btn-small" onclick="saveAccountEdit('${id}')">
+            <button class="btn btn-success btn-small" onclick="saveAccountEdit('${account.id}')">
                 Save
             </button>
-            <button class="btn btn-secondary btn-small" onclick="cancelAccountEdit('${id}')">
+            <button class="btn btn-secondary btn-small" onclick="cancelAccountEdit('${account.id}')">
                 Cancel
             </button>
         </div>
@@ -926,7 +944,7 @@ function editAccount(id) {
 
     row.classList.add('editing-row');
     row.querySelector('.edit-email').focus();
-} 
+}
 
 async function saveAccountEdit(id) {
     const row = document.querySelector(`tr[data-id="${id}"]`);
