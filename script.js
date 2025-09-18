@@ -462,6 +462,7 @@ function clearSearch() {
     filteredAccounts = [];
 }
 
+// Fixed renderSearchResults function
 function renderSearchResults() {
     const resultsContainer = document.getElementById('searchResults');
     const resultsBody = document.getElementById('searchResultsBody');
@@ -494,7 +495,7 @@ function renderSearchResults() {
             </td>
         </tr>
         ${accountsByClient[client].map(account => `
-            <tr class="account-row">
+            <tr class="account-row" data-id="${account.id}">
                 <td>${account.client}</td>
                 <td>${account.email}</td>
                 <td>${formatDateForDisplay(account.date)}</td>
@@ -518,6 +519,20 @@ function renderSearchResults() {
     
     resultCount.textContent = `${filteredAccounts.length} result${filteredAccounts.length !== 1 ? 's' : ''} found`;
     resultsContainer.style.display = 'block';
+}
+
+// Also need to add the confirmDeleteAccount function if it's missing
+function confirmDeleteAccount(id) {
+    const account = accounts.find(acc => acc.id === id);
+    if (!account) {
+        showMessage('Account not found', 'error');
+        return;
+    }
+    
+    showConfirmModal(
+        `Are you sure you want to delete the account for ${account.email}?`,
+        () => deleteAccountConfirmed(id)
+    );
 }
 
 // Export Functions
