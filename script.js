@@ -462,7 +462,6 @@ function clearSearch() {
     filteredAccounts = [];
 }
 
-// Fixed renderSearchResults function
 function renderSearchResults() {
     const resultsContainer = document.getElementById('searchResults');
     const resultsBody = document.getElementById('searchResultsBody');
@@ -496,8 +495,8 @@ function renderSearchResults() {
         </tr>
         ${accountsByClient[client].map(account => `
             <tr class="account-row" data-id="${account.id}">
-                <td>${account.client}</td>
-                <td>${account.email}</td>
+                <td>${escapeHtml(account.client)}</td>
+                <td>${escapeHtml(account.email)}</td>
                 <td>${formatDateForDisplay(account.date)}</td>
                 <td>${renderOrderNumbers(account.orderNumbers)}</td>
                 <td>
@@ -508,7 +507,7 @@ function renderSearchResults() {
                         <button class="btn btn-danger btn-small" onclick="confirmDeleteAccount('${account.id}')">
                             Delete
                         </button>
-                        <button class="btn btn-copy btn-small" onclick="copyToClipboard('${account.email}')">
+                        <button class="btn btn-copy btn-small" onclick="copyToClipboard('${escapeHtml(account.email)}')">
                             Copy
                         </button>
                     </div>
@@ -519,20 +518,6 @@ function renderSearchResults() {
     
     resultCount.textContent = `${filteredAccounts.length} result${filteredAccounts.length !== 1 ? 's' : ''} found`;
     resultsContainer.style.display = 'block';
-}
-
-// Also need to add the confirmDeleteAccount function if it's missing
-function confirmDeleteAccount(id) {
-    const account = accounts.find(acc => acc.id === id);
-    if (!account) {
-        showMessage('Account not found', 'error');
-        return;
-    }
-    
-    showConfirmModal(
-        `Are you sure you want to delete the account for ${account.email}?`,
-        () => deleteAccountConfirmed(id)
-    );
 }
 
 // Export Functions
@@ -795,7 +780,7 @@ function renderExpiringAccounts() {
     }
 }
 
-// Account Management Functions
+// Account Management Functions - FIXED EDIT FUNCTIONALITY
 function addNewAccount(clientName) {
     const tbody = document.getElementById(`client-${clientName.replace(/\s+/g, '-')}`);
     const newRow = document.createElement('tr');
@@ -900,6 +885,7 @@ function cancelNewAccount(button) {
     row.remove();
 }
 
+// COMPLETELY REWRITTEN EDIT FUNCTION - FIXED
 function editAccount(id) {
     const account = accounts.find(acc => acc.id === id);
     if (!account) {
@@ -907,47 +893,88 @@ function editAccount(id) {
         return;
     }
 
-    let row;
+    let row = null;
 
-    // First, try to find the row in the SEARCH RESULTS table
+    // Try multiple ways to find the row
     if (isSearchActive) {
-        row = document.querySelector(`#searchResultsBody tr[data-id="${id}"]`);
+        // First try with data-id attribute in search results
+        row = document.querySelector(`#searchResultsBody tr.account-row[data-id="${id}"]`);
+        
+        // If not found, try searching through all rows in search results
+        if (!row) {
+            const searchRows = document.querySelectorAll('#searchResultsBody tr.account-row');
+            for (let r of searchRows) {
+                const editBtn = r.querySelector(`button[onclick="editAccount('${id}')"]`);
+                if (editBtn) {
+                    row = r;
+                    break;
+                }
+            }
+        }
     } else {
-        // If not in search mode, find it in the main clients table
-        row = document.querySelector(`tr[data-id="${id}"]`);
+        // For main table, try with data-id first
+        row = document.querySelector(`tr.account-row[data-id="${id}"]`);
+        
+        // If not found, search through all account rows
+        if (!row) {
+            const allRows = document.querySelectorAll('tr.account-row');
+            for (let r of allRows) {
+                const editBtn = r.querySelector(`button[onclick="editAccount('${id}')"]`);
+                if (editBtn) {
+                    row = r;
+                    break;
+                }
+            }
+        }
     }
 
     if (!row) {
         console.error(`Could not find row for account ID: ${id}`);
-        showMessage('Could not find account to edit. Please try again.', 'error');
+        console.log('Available rows:', document.querySelectorAll('tr.account-row'));
+        showMessage('Could not find account to edit. Please refresh and try again.', 'error');
         return;
     }
 
+    // Add debugging
+    console.log('Found row for editing:', row);
+    console.log('Row HTML:', row.innerHTML);
+
     // Identify cells based on their position in the row
-    // Search results have 5 columns: Client, Email, Date, Orders, Actions
-    // Main table has 4 columns: Email, Date, Orders, Actions
-    const cells = row.querySelectorAll('td');
+    const cells = Array.from(row.querySelectorAll('td'));
+    console.log('Number of cells:', cells.length);
+
     let emailCell, dateCell, ordersCell, actionsCell;
 
     if (isSearchActive) {
-        // In search results: Email is 2nd cell (index 1), Date is 3rd (index 2), Orders is 4th (index 3), Actions is 5th (index 4)
-        emailCell = cells[1];
-        dateCell = cells[2];
-        ordersCell = cells[3];
-        actionsCell = cells[4];
+        // In search results: Client(0), Email(1), Date(2), Orders(3), Actions(4)
+        if (cells.length >= 5) {
+            emailCell = cells[1];
+            dateCell = cells[2];
+            ordersCell = cells[3];
+            actionsCell = cells[4];
+        }
     } else {
-        // In main table: Email is 1st cell (index 0), Date is 2nd (index 1), Orders is 3rd (index 2), Actions is 4th (index 3)
-        emailCell = cells[0];
-        dateCell = cells[1];
-        ordersCell = cells[2];
-        actionsCell = cells[3];
+        // In main table: Email(0), Date(1), Orders(2), Actions(3)
+        if (cells.length >= 4) {
+            emailCell = cells[0];
+            dateCell = cells[1];
+            ordersCell = cells[2];
+            actionsCell = cells[3];
+        }
     }
 
     if (!emailCell || !dateCell || !ordersCell || !actionsCell) {
         console.error('Could not identify table cells for editing');
+        console.log('Cells found:', { emailCell, dateCell, ordersCell, actionsCell });
         showMessage('Error preparing edit form', 'error');
         return;
     }
+
+    // Store original content for cancel functionality
+    row.dataset.originalEmail = emailCell.textContent || emailCell.innerText;
+    row.dataset.originalDate = dateCell.textContent || dateCell.innerText;
+    row.dataset.originalOrders = ordersCell.innerHTML;
+    row.dataset.originalActions = actionsCell.innerHTML;
 
     // Create the edit form
     emailCell.innerHTML = `<input type="email" class="edit-email" value="${escapeHtml(account.email)}">`;
@@ -965,14 +992,32 @@ function editAccount(id) {
     `;
 
     row.classList.add('editing-row');
-    row.querySelector('.edit-email').focus();
+    
+    // Focus on email input
+    const emailInput = row.querySelector('.edit-email');
+    if (emailInput) {
+        emailInput.focus();
+        emailInput.select();
+    }
 }
 
 async function saveAccountEdit(id) {
     // Find the row in either search results or main table
-    let row = document.querySelector(`#searchResultsBody tr[data-id="${id}"]`);
+    let row = document.querySelector(`#searchResultsBody tr.account-row[data-id="${id}"]`);
     if (!row) {
-        row = document.querySelector(`tr[data-id="${id}"]`);
+        row = document.querySelector(`tr.account-row[data-id="${id}"]`);
+    }
+    
+    // Fallback search
+    if (!row) {
+        const allRows = document.querySelectorAll('tr.account-row');
+        for (let r of allRows) {
+            const saveBtn = r.querySelector(`button[onclick="saveAccountEdit('${id}')"]`);
+            if (saveBtn) {
+                row = r;
+                break;
+            }
+        }
     }
     
     if (!row) {
@@ -1030,17 +1075,107 @@ async function saveAccountEdit(id) {
     }
 }
 
+// REWRITTEN CANCEL FUNCTION
 function cancelAccountEdit(id) {
-    // Simply re-render the appropriate view
+    let row = null;
+
+    // Find the row being edited
     if (isSearchActive) {
-        renderSearchResults(); // Stay in search results
+        row = document.querySelector(`#searchResultsBody tr.account-row[data-id="${id}"]`);
+        if (!row) {
+            const searchRows = document.querySelectorAll('#searchResultsBody tr.account-row');
+            for (let r of searchRows) {
+                const saveBtn = r.querySelector(`button[onclick="saveAccountEdit('${id}')"]`);
+                if (saveBtn) {
+                    row = r;
+                    break;
+                }
+            }
+        }
     } else {
-        renderAccounts(); // Go back to main view
+        row = document.querySelector(`tr.account-row[data-id="${id}"]`);
+        if (!row) {
+            const allRows = document.querySelectorAll('tr.account-row');
+            for (let r of allRows) {
+                const saveBtn = r.querySelector(`button[onclick="saveAccountEdit('${id}')"]`);
+                if (saveBtn) {
+                    row = r;
+                    break;
+                }
+            }
+        }
     }
+
+    if (!row) {
+        // Fallback: re-render the appropriate view
+        if (isSearchActive) {
+            renderSearchResults();
+        } else {
+            renderAccounts();
+        }
+        return;
+    }
+
+    // Restore original content if available
+    const cells = Array.from(row.querySelectorAll('td'));
+    let emailCell, dateCell, ordersCell, actionsCell;
+
+    if (isSearchActive && cells.length >= 5) {
+        emailCell = cells[1];
+        dateCell = cells[2];
+        ordersCell = cells[3];
+        actionsCell = cells[4];
+    } else if (!isSearchActive && cells.length >= 4) {
+        emailCell = cells[0];
+        dateCell = cells[1];
+        ordersCell = cells[2];
+        actionsCell = cells[3];
+    }
+
+    if (emailCell && dateCell && ordersCell && actionsCell) {
+        // Restore original content
+        const account = accounts.find(acc => acc.id === id);
+        if (account) {
+            emailCell.innerHTML = account.email;
+            dateCell.innerHTML = formatDateForDisplay(account.date);
+            ordersCell.innerHTML = renderOrderNumbers(account.orderNumbers);
+            actionsCell.innerHTML = `
+                <div class="action-buttons">
+                    <button class="btn btn-warning btn-small" onclick="editAccount('${account.id}')">
+                        Edit
+                    </button>
+                    <button class="btn btn-danger btn-small" onclick="confirmDeleteAccount('${account.id}')">
+                        Delete
+                    </button>
+                    <button class="btn btn-copy btn-small" onclick="copyToClipboard('${account.email}')">
+                        Copy
+                    </button>
+                </div>
+            `;
+        }
+    }
+
+    row.classList.remove('editing-row');
+    
+    // Clean up stored data
+    delete row.dataset.originalEmail;
+    delete row.dataset.originalDate;
+    delete row.dataset.originalOrders;
+    delete row.dataset.originalActions;
 }
-function cancelAccountEdit(id) {
-    // Simply re-render the search results to go back to view mode
-    renderSearchResults();
+
+// DELETE FUNCTION
+function confirmDeleteAccount(id) {
+    const account = accounts.find(acc => acc.id === id);
+    if (!account) {
+        showMessage('Account not found', 'error');
+        return;
+    }
+    
+    showConfirmModal(
+        `Are you sure you want to delete the account for ${account.email}?`,
+        () => deleteAccountConfirmed(id)
+    );
 }
 
 async function deleteAccountConfirmed(id) {
