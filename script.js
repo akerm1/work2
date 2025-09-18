@@ -892,18 +892,49 @@ function editAccount(id) {
         return;
     }
 
-    // Find the row in the SEARCH RESULTS table
-    const row = document.querySelector(`#searchResultsBody tr[data-id="${id}"]`);
+    let row;
+
+    // First, try to find the row in the SEARCH RESULTS table
+    if (isSearchActive) {
+        row = document.querySelector(`#searchResultsBody tr[data-id="${id}"]`);
+    } else {
+        // If not in search mode, find it in the main clients table
+        row = document.querySelector(`tr[data-id="${id}"]`);
+    }
+
     if (!row) {
-        showMessage('Could not find account row to edit', 'error');
+        console.error(`Could not find row for account ID: ${id}`);
+        showMessage('Could not find account to edit. Please try again.', 'error');
         return;
     }
 
-    const emailCell = row.querySelector('td:nth-child(2)'); // Email is 2nd column in search results
-    const dateCell = row.querySelector('td:nth-child(3)');  // Date is 3rd column
-    const ordersCell = row.querySelector('td:nth-child(4)'); // Orders is 4th column
-    const actionsCell = row.querySelector('td:nth-child(5)'); // Actions is 5th column
+    // Identify cells based on their position in the row
+    // Search results have 5 columns: Client, Email, Date, Orders, Actions
+    // Main table has 4 columns: Email, Date, Orders, Actions
+    const cells = row.querySelectorAll('td');
+    let emailCell, dateCell, ordersCell, actionsCell;
 
+    if (isSearchActive) {
+        // In search results: Email is 2nd cell (index 1), Date is 3rd (index 2), Orders is 4th (index 3), Actions is 5th (index 4)
+        emailCell = cells[1];
+        dateCell = cells[2];
+        ordersCell = cells[3];
+        actionsCell = cells[4];
+    } else {
+        // In main table: Email is 1st cell (index 0), Date is 2nd (index 1), Orders is 3rd (index 2), Actions is 4th (index 3)
+        emailCell = cells[0];
+        dateCell = cells[1];
+        ordersCell = cells[2];
+        actionsCell = cells[3];
+    }
+
+    if (!emailCell || !dateCell || !ordersCell || !actionsCell) {
+        console.error('Could not identify table cells for editing');
+        showMessage('Error preparing edit form', 'error');
+        return;
+    }
+
+    // Create the edit form
     emailCell.innerHTML = `<input type="email" class="edit-email" value="${escapeHtml(account.email)}">`;
     dateCell.innerHTML = `<input type="date" class="edit-date" value="${account.date}">`;
     ordersCell.innerHTML = renderOrderInputs(account.orderNumbers, id);
@@ -923,16 +954,28 @@ function editAccount(id) {
 }
 
 async function saveAccountEdit(id) {
-    // Find the row in the SEARCH RESULTS table
-    const row = document.querySelector(`#searchResultsBody tr[data-id="${id}"]`);
+    // Find the row in either search results or main table
+    let row = document.querySelector(`#searchResultsBody tr[data-id="${id}"]`);
+    if (!row) {
+        row = document.querySelector(`tr[data-id="${id}"]`);
+    }
+    
     if (!row) {
         showMessage('Could not find account row to save', 'error');
         return;
     }
 
-    const email = row.querySelector('.edit-email').value.trim();
-    const date = row.querySelector('.edit-date').value;
+    const emailInput = row.querySelector('.edit-email');
+    const dateInput = row.querySelector('.edit-date');
     const orderInputs = row.querySelectorAll('.order-input');
+
+    if (!emailInput || !dateInput) {
+        showMessage('Error: Edit form elements not found', 'error');
+        return;
+    }
+
+    const email = emailInput.value.trim();
+    const date = dateInput.value;
     const orderNumbers = Array.from(orderInputs).map(input => sanitizeOrderNumber(input.value));
 
     if (!email || !validateEmail(email)) {
@@ -958,11 +1001,13 @@ async function saveAccountEdit(id) {
         hideLoading();
         showMessage('Account updated successfully');
         
-        // Re-render only the search results to reflect the changes
-        renderSearchResults();
-        
-        // Also update the main accounts list and expiring accounts for consistency
-        renderExpiringAccounts();
+        // Re-render based on current mode
+        if (isSearchActive) {
+            renderSearchResults(); // Stay in search results
+        } else {
+            renderAccounts(); // Update main view
+        }
+        renderExpiringAccounts(); // Always update expiring accounts
     } catch (error) {
         hideLoading();
         showMessage('Error updating account', 'error');
@@ -970,6 +1015,14 @@ async function saveAccountEdit(id) {
     }
 }
 
+function cancelAccountEdit(id) {
+    // Simply re-render the appropriate view
+    if (isSearchActive) {
+        renderSearchResults(); // Stay in search results
+    } else {
+        renderAccounts(); // Go back to main view
+    }
+}
 function cancelAccountEdit(id) {
     // Simply re-render the search results to go back to view mode
     renderSearchResults();
