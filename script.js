@@ -888,21 +888,29 @@ function cancelNewAccount(button) {
 function editAccount(id) {
     const account = accounts.find(acc => acc.id === id);
     if (!account) return;
-    
+
+    // NEW CODE: If coming from search, ensure the client section is expanded in main UI
+    expandedClients.add(account.client); // Force expand the client section
+
     if (isSearchActive) {
         document.getElementById('searchResults').style.display = 'none';
-        renderAccounts();
+        renderAccounts(); // Re-render main UI with the client now expanded
     }
-    
+
+    // Now find the row in the (now expanded and re-rendered) main UI
     const row = document.querySelector(`tr[data-id="${id}"]`);
-    if (!row) return;
-    
+    if (!row) {
+        console.error(`Could not find row for account ID: ${id}`);
+        showMessage('Could not find account to edit. Please try again.', 'error');
+        return;
+    }
+
     const emailCell = row.querySelector('.email-cell');
     const dateCell = row.querySelector('.date-cell');
     const ordersCell = row.querySelector('.orders-cell');
     const actionsCell = row.querySelector('.actions-cell');
-    
-    emailCell.innerHTML = `<input type="email" class="edit-email" value="${account.email}">`;
+
+    emailCell.innerHTML = `<input type="email" class="edit-email" value="${escapeHtml(account.email)}">`;
     dateCell.innerHTML = `<input type="date" class="edit-date" value="${account.date}">`;
     ordersCell.innerHTML = renderOrderInputs(account.orderNumbers, id);
     actionsCell.innerHTML = `
@@ -915,10 +923,10 @@ function editAccount(id) {
             </button>
         </div>
     `;
-    
+
     row.classList.add('editing-row');
     row.querySelector('.edit-email').focus();
-}
+} 
 
 async function saveAccountEdit(id) {
     const row = document.querySelector(`tr[data-id="${id}"]`);
