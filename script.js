@@ -1,4 +1,34 @@
-// Firebase Configuration
+/**************************************************************
+ * script.js
+ *
+ * Email Account Organizer - FULL script
+ * - Uses Firestore (compat) for storage
+ * - Unified search (email/client/order)
+ * - Order durations (1/2/3 months)
+ * - Move Email modal (in-site, suggests existing clients)
+ * - Bulk upload modal
+ * - Export (CSV / Excel / JSON)
+ * - Edit / Add / Delete accounts
+ * - Plenty of section headers and inline comments for clarity
+ *
+ * IMPORTANT:
+ * - Replace the firebaseConfig below with your project's keys if needed.
+ * - This code expects the following HTML IDs (from HTML you accepted):
+ *   #unifiedSearchInput, #unifiedSearchBtn, #clearUnifiedSearchBtn,
+ *   #clientsContainer, #expiringTableBody, #noExpiringAccounts,
+ *   #exportCSVBtn, #exportExcelBtn, #exportJSONBtn,
+ *   #bulkUploadModal, #bulkEmailInput, #processBulkUpload, #cancelBulkUpload,
+ *   #confirmModal, #confirmMessage, #confirmYes, #confirmNo,
+ *   #moveEmailModal, #moveClientSelect, #confirmMoveEmail, #cancelMoveEmail,
+ *   #loadingSpinner, #searchResults, #searchResultsBody, #resultCount
+ *
+ ****************************************************************/
+
+/* ============================================================
+   SECTION: Firebase Configuration & Initialization
+   ============================================================ */
+
+// NOTE: keep your real API keys here; the example below uses placeholder values
 const firebaseConfig = {
     apiKey: "AIzaSyDznYcUtQWRD7QqYBDr1QupUMfVqZnfGEE",
     authDomain: "my-work-82778.firebaseapp.com",
@@ -8,771 +38,509 @@ const firebaseConfig = {
     appId: "1:1070444118182:web:bae373255bd124d3a2b467"
 };
 
-// Initialize Firebase safely
-let db;
+let db = null;
 try {
+    // initialize firebase compat
     firebase.initializeApp(firebaseConfig);
     db = firebase.firestore();
-    console.log("✅ Firebase initialized successfully");
-} catch (error) {
-    console.error("❌ Firebase initialization failed:", error);
-    showError("Failed to connect to Firebase. Please check your configuration.");
+    console.log('✅ Firebase initialized');
+} catch (err) {
+    console.error('❌ Firebase init error:', err);
+    // show friendly error on page
+    showError('Failed to connect to Firebase. Check your configuration in script.js.');
 }
 
-// Global variables
-let currentBulkClient = null;
-let accounts = [];
-let clients = [];
-let filteredAccounts = [];
-let isSearchActive = false;
-let expandedClients = new Set(); // Track expanded client sections
+/* ============================================================
+   SECTION: Global State
+   ============================================================ */
 
-// Global error fallback
-window.addEventListener("error", (event) => {
-    console.error("❌ Runtime Error:", event.error);
-    showError("An unexpected error occurred. Check console for details.");
-});
+const MAX_ORDER_SLOTS = 5; // keep 5 order slots like your original design
 
-// Helper function to show error in UI
-function showError(message) {
-    let errorBox = document.getElementById("errorBox");
-    if (!errorBox) {
-        errorBox = document.createElement("div");
-        errorBox.id = "errorBox";
-        errorBox.style.position = "fixed";
-        errorBox.style.top = "20px";
-        errorBox.style.left = "50%";
-        errorBox.style.transform = "translateX(-50%)";
-        errorBox.style.background = "#ff4444";
-        errorBox.style.color = "white";
-        errorBox.style.padding = "12px 20px";
-        errorBox.style.borderRadius = "8px";
-        errorBox.style.zIndex = "9999";
-        errorBox.style.fontFamily = "Arial, sans-serif";
-        errorBox.style.boxShadow = "0 2px 6px rgba(0,0,0,0.3)";
-        document.body.appendChild(errorBox);
-    }
-    errorBox.innerText = message;
-}
+let accounts = [];           // all accounts loaded from Firestore
+let clients = [];            // unique client names
+let filteredAccounts = [];   // results when searching
+let isSearchActive = false;  // whether search results are shown
+let expandedClients = new Set(); // which clients are expanded in UI
 
-// Utility Functions
+let currentBulkClient = null;   // client for bulk upload modal
+let moveEmailTargetAccountId = null; // account id currently being moved (for modal)
+
+/* ============================================================
+   SECTION: Utility Helpers (dates, sanitize, escape)
+   ============================================================ */
+
+/**
+ * formatDateForDisplay()
+ * - shows dd/mm/yyyy (safe and stable)
+ */
 function formatDateForDisplay(dateString) {
     if (!dateString) return '';
-    const date = new Date(dateString);
-    const day = String(date.getDate()).padStart(2, '0');
-    const month = String(date.getMonth() + 1).padStart(2, '0');
-    const year = date.getFullYear();
-    return `${day}/${month}/${year}`;
+    const parts = String(dateString).split('-');
+    if (parts.length === 3) {
+        // assume yyyy-mm-dd
+        return `${parts[2].padStart(2,'0')}/${parts[1].padStart(2,'0')}/${parts[0]}`;
+    }
+    // fallback to Date parsing
+    const d = new Date(dateString);
+    if (d instanceof Date && !isNaN(d)) {
+        const day = String(d.getDate()).padStart(2, '0');
+        const month = String(d.getMonth()+1).padStart(2, '0');
+        const year = d.getFullYear();
+        return `${day}/${month}/${year}`;
+    }
+    return dateString;
 }
 
+/**
+ * formatDateForStorage()
+ * - ensures YYYY-MM-DD or today
+ */
 function formatDateForStorage(dateString) {
     if (!dateString) return getTodayFormatted();
     return dateString;
 }
 
+/**
+ * getTodayFormatted() / getTomorrowFormatted()
+ */
 function getTodayFormatted() {
-    const today = new Date();
-    const year = today.getFullYear();
-    const month = String(today.getMonth() + 1).padStart(2, '0');
-    const day = String(today.getDate()).padStart(2, '0');
-    return `${year}-${month}-${day}`;
+    const t = new Date();
+    const y = t.getFullYear();
+    const m = String(t.getMonth()+1).padStart(2,'0');
+    const d = String(t.getDate()).padStart(2,'0');
+    return `${y}-${m}-${d}`;
 }
-
 function getTomorrowFormatted() {
-    const tomorrow = new Date();
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    const year = tomorrow.getFullYear();
-    const month = String(tomorrow.getMonth() + 1).padStart(2, '0');
-    const day = String(tomorrow.getDate()).padStart(2, '0');
-    return `${year}-${month}-${day}`;
+    const t = new Date();
+    t.setDate(t.getDate() + 1);
+    const y = t.getFullYear();
+    const m = String(t.getMonth()+1).padStart(2,'0');
+    const d = String(t.getDate()).padStart(2,'0');
+    return `${y}-${m}-${d}`;
 }
 
-function showLoading() {
-    document.getElementById('loadingSpinner').style.display = 'flex';
+/**
+ * escapeHtml()
+ * - simple html escape to prevent injection in rendered strings
+ */
+function escapeHtml(text) {
+    if (text === null || text === undefined) return '';
+    return String(text)
+        .replace(/&/g,'&amp;')
+        .replace(/</g,'&lt;')
+        .replace(/>/g,'&gt;')
+        .replace(/"/g,'&quot;')
+        .replace(/'/g,'&#039;');
 }
 
-function hideLoading() {
-    document.getElementById('loadingSpinner').style.display = 'none';
+/**
+ * sanitizeOrderNumber()
+ * - keep only useful characters
+ */
+function sanitizeOrderNumber(order) {
+    return String(order || '').replace(/[^a-zA-Z0-9\s\-_@.]/g, '').trim().substring(0, 100);
 }
 
+/* ============================================================
+   SECTION: UI Helpers - Notifications & Loading
+   ============================================================ */
+
+/* NOTE: This showMessage function restores the original style you had:
+   - creates a `.message` element with class "success" or "error"
+   - disappears after 4 seconds
+*/
 function showMessage(message, type = 'success') {
     const messageEl = document.createElement('div');
     messageEl.className = `message ${type}`;
     messageEl.textContent = message;
     document.body.appendChild(messageEl);
-    
+
     setTimeout(() => {
-        messageEl.remove();
+        try { messageEl.remove(); } catch (e) {}
     }, 4000);
 }
 
-function copyToClipboard(text) {
-    copyToClipboardSafe(text, 'Emails copied to clipboard');
+/* showError creates a visible fixed error box at top (used for critical failures) */
+function showError(message) {
+    let errorBox = document.getElementById('errorBox');
+    if (!errorBox) {
+        errorBox = document.createElement('div');
+        errorBox.id = 'errorBox';
+        errorBox.style.position = 'fixed';
+        errorBox.style.top = '10px';
+        errorBox.style.left = '50%';
+        errorBox.style.transform = 'translateX(-50%)';
+        errorBox.style.background = '#ff4d4f';
+        errorBox.style.color = '#fff';
+        errorBox.style.padding = '10px 14px';
+        errorBox.style.borderRadius = '6px';
+        errorBox.style.zIndex = '99999';
+        document.body.appendChild(errorBox);
+    }
+    errorBox.textContent = message;
 }
 
-// Order Number Functions
-function renderOrderNumbers(orderNumbers) {
-    if (!orderNumbers) orderNumbers = ['', '', '', '', ''];
-    
-    return `<div class="order-numbers">
-        ${orderNumbers.map((order, index) => {
-            if (order && order.trim()) {
-                return `
-                    <div class="order-number">
-                        <span class="order-text">${escapeHtml(order)}</span>
-                        <button class="order-copy-btn" type="button" data-copy="${escapeHtml(order)}" title="Copy ${escapeHtml(order)}">
-                            📋
-                        </button>
-                    </div>
-                `;
-            } else {
-                return `
-                    <div class="order-number empty">
-                        <span class="order-text">Order ${index + 1}</span>
-                    </div>
-                `;
-            }
-        }).join('')}
-    </div>`;
+/* Loading spinner show/hide (assumes #loadingSpinner exists) */
+function showLoading() {
+    const el = document.getElementById('loadingSpinner');
+    if (el) el.style.display = 'flex';
+}
+function hideLoading() {
+    const el = document.getElementById('loadingSpinner');
+    if (el) el.style.display = 'none';
 }
 
-function renderOrderInputs(orderNumbers, accountId) {
-    if (!orderNumbers) orderNumbers = ['', '', '', '', ''];
-    
-    return `<div class="order-inputs">
-        ${orderNumbers.map((order, index) => `
-            <input type="text" 
-                   value="${escapeHtml(order)}" 
-                   placeholder="Order ${index + 1}"
-                   data-account="${escapeHtml(accountId)}"
-                   data-index="${index}"
-                   class="order-input"
-                   maxlength="50">
-        `).join('')}
-    </div>`;
-}
-
-// Security helper function
-function escapeHtml(text) {
-    const map = {
-        '&': '&amp;',
-        '<': '&lt;',
-        '>': '&gt;',
-        '"': '&quot;',
-        "'": '&#039;'
-    };
-    return String(text).replace(/[&<>"']/g, function(m) { return map[m]; });
-}
-
-// Safe copy function with fallback
-function copyToClipboardSafe(text, successMessage = 'Copied to clipboard') {
-    // Modern clipboard API
+/* Copy to clipboard safe method (clipboard API + fallback) */
+function copyToClipboardSafe(text, successMessage='Copied to clipboard') {
+    if (!text) {
+        showMessage('Nothing to copy', 'error');
+        return;
+    }
     if (navigator.clipboard && window.isSecureContext) {
-        navigator.clipboard.writeText(text)
-            .then(() => showMessage(successMessage))
-            .catch(err => {
-                console.warn('Clipboard API failed, using fallback');
-                fallbackCopy(text, successMessage);
-            });
+        navigator.clipboard.writeText(text).then(() => showMessage(successMessage)).catch(() => fallbackCopy(text, successMessage));
     } else {
-        // Fallback for older browsers or non-HTTPS
         fallbackCopy(text, successMessage);
     }
 }
-
 function fallbackCopy(text, successMessage) {
     try {
-        const textArea = document.createElement('textarea');
-        textArea.value = text;
-        textArea.style.position = 'fixed';
-        textArea.style.left = '-999999px';
-        textArea.style.top = '-999999px';
-        document.body.appendChild(textArea);
-        textArea.focus();
-        textArea.select();
-        
-        const successful = document.execCommand('copy');
-        document.body.removeChild(textArea);
-        
-        if (successful) {
-            showMessage(successMessage);
-        } else {
-            showMessage('Copy failed - please select and copy manually', 'error');
-        }
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.position = 'fixed';
+        ta.style.left = '-9999px';
+        document.body.appendChild(ta);
+        ta.focus(); ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+        showMessage(successMessage);
     } catch (err) {
-        showMessage('Copy not supported in this browser', 'error');
-        console.error('Copy failed:', err);
+        console.error('copy error', err);
+        showMessage('Copy failed', 'error');
     }
 }
 
-function searchByOrderNumber() {
-    const query = document.getElementById('orderSearchInput').value.trim().toLowerCase();
-    
-    if (!query) {
-        document.getElementById('orderResults').style.display = 'none';
-        return;
-    }
+/* ============================================================
+   SECTION: Order rendering (numbers + durations)
+   ============================================================ */
 
-    const matches = accounts.filter(account => 
-        account.orderNumbers && account.orderNumbers.some(order => 
-            order.toLowerCase().includes(query)
-        )
-    );
+/**
+ * renderOrderNumbers(orderNumbers, orderDurations)
+ * - returns an HTML snippet showing orders with duration labels and copy buttons
+ */
+function renderOrderNumbers(orderNumbers, orderDurations) {
+    orderNumbers = Array.isArray(orderNumbers) ? orderNumbers.slice(0, MAX_ORDER_SLOTS) : Array(MAX_ORDER_SLOTS).fill('');
+    orderDurations = Array.isArray(orderDurations) ? orderDurations.slice(0, MAX_ORDER_SLOTS) : Array(MAX_ORDER_SLOTS).fill('1');
 
-    renderOrderSearchResults(matches, query);
+    // ensure length
+    while (orderNumbers.length < MAX_ORDER_SLOTS) orderNumbers.push('');
+    while (orderDurations.length < MAX_ORDER_SLOTS) orderDurations.push('1');
+
+    const parts = orderNumbers.map((order, i) => {
+        if (order && String(order).trim()) {
+            return `<div class="order-number"><span class="order-text">${escapeHtml(order)}</span> <span class="order-duration">(${escapeHtml(orderDurations[i])}M)</span> <button class="order-copy-btn" data-copy="${escapeHtml(order)}" title="Copy order">📋</button></div>`;
+        } else {
+            return `<div class="order-number empty"><span class="order-text">Order ${i+1}</span></div>`;
+        }
+    });
+
+    return `<div class="order-numbers">${parts.join('')}</div>`;
 }
 
-function renderOrderSearchResults(matches, query) {
-    const resultsDiv = document.getElementById('orderResults');
-    
-    if (matches.length === 0) {
-        resultsDiv.innerHTML = `<div class="no-data">No accounts found with order number containing "${query}"</div>`;
-        resultsDiv.style.display = 'block';
-        return;
-    }
+/**
+ * renderOrderInputs(orderNumbers, orderDurations, accountId)
+ * - renders input fields plus a select for duration (1/2/3)
+ */
+function renderOrderInputs(orderNumbers, orderDurations, accountId) {
+    orderNumbers = Array.isArray(orderNumbers) ? orderNumbers.slice(0,MAX_ORDER_SLOTS) : Array(MAX_ORDER_SLOTS).fill('');
+    orderDurations = Array.isArray(orderDurations) ? orderDurations.slice(0,MAX_ORDER_SLOTS) : Array(MAX_ORDER_SLOTS).fill('1');
 
-    const resultsHTML = matches.map(account => {
-        const matchingOrders = account.orderNumbers.filter(order => 
-            order.toLowerCase().includes(query)
-        ).join(', ');
+    while (orderNumbers.length < MAX_ORDER_SLOTS) orderNumbers.push('');
+    while (orderDurations.length < MAX_ORDER_SLOTS) orderDurations.push('1');
 
+    const parts = orderNumbers.map((order, i) => {
+        const dur = orderDurations[i] || '1';
         return `
-            <div class="order-match">
-                <div class="order-match-header">
-                    ${escapeHtml(account.client)} - ${escapeHtml(account.email)}
-                </div>
-                <div class="order-match-details">
-                    Matching Orders: <strong>${escapeHtml(matchingOrders)}</strong><br>
-                    All Orders: ${escapeHtml(account.orderNumbers.filter(o => o).join(', ') || 'None')}<br>
-                    Expiration: ${formatDateForDisplay(account.date)}
-                </div>
+            <div class="order-with-duration" style="display:flex;gap:6px;align-items:center;margin-bottom:6px;">
+                <input type="text" class="order-input" value="${escapeHtml(order)}" placeholder="Order ${i+1}" data-account="${escapeHtml(accountId)}" data-index="${i}" maxlength="100">
+                <select class="order-duration" data-account="${escapeHtml(accountId)}" data-index="${i}">
+                    <option value="1" ${dur==='1'?'selected':''}>1M</option>
+                    <option value="2" ${dur==='2'?'selected':''}>2M</option>
+                    <option value="3" ${dur==='3'?'selected':''}>3M</option>
+                </select>
             </div>
         `;
-    }).join('');
-
-    resultsDiv.innerHTML = `
-        <h4>Found ${matches.length} account${matches.length !== 1 ? 's' : ''} with matching order numbers:</h4>
-        ${resultsHTML}
-    `;
-    resultsDiv.style.display = 'block';
-}
-
-// Enhanced security for dynamic content
-function sanitizeForHTML(str) {
-    return escapeHtml(String(str || ''));
-}
-
-function createSecureElement(tag, attributes = {}, textContent = '') {
-    const element = document.createElement(tag);
-    
-    // Set attributes securely
-    Object.keys(attributes).forEach(key => {
-        if (key === 'onclick') {
-            // Avoid inline onclick handlers
-            return;
-        }
-        element.setAttribute(key, sanitizeForHTML(attributes[key]));
     });
-    
-    if (textContent) {
-        element.textContent = textContent;
-    }
-    
-    return element;
+
+    return `<div class="order-inputs">${parts.join('')}</div>`;
 }
 
-function clearOrderSearch() {
-    document.getElementById('orderSearchInput').value = '';
-    document.getElementById('orderResults').style.display = 'none';
-}
+/* ============================================================
+   SECTION: Firestore CRUD Helpers
+   ============================================================ */
 
-// Event delegation for order copy buttons
-function handleOrderCopy(event) {
-    if (event.target.classList.contains('order-copy-btn')) {
-        event.preventDefault();
-        event.stopPropagation();
-        const orderText = event.target.getAttribute('data-copy');
-        if (orderText && orderText.trim()) {
-            copyToClipboardSafe(orderText.trim(), `Order "${orderText}" copied to clipboard`);
-        }
-    }
-}
-
-// Firebase Functions
+/**
+ * loadAccounts()
+ * - loads all accounts from firestore into 'accounts' array
+ * - normalizes missing orderDurations for backwards compatibility
+ */
 async function loadAccounts() {
     if (!db) {
-        showError("Firestore not available. Accounts cannot be loaded.");
+        showError('Firestore not initialized.');
         return;
     }
-
     try {
         showLoading();
         const snapshot = await db.collection('accounts').get();
         accounts = [];
-        
-        if (snapshot.empty) {
-            console.warn("⚠️ No accounts found in Firestore.");
-            clients = [];
-            renderAccounts();
-            renderExpiringAccounts();
-            hideLoading();
-            return;
-        }
-
         snapshot.forEach(doc => {
-            const data = doc.data();
-            console.log("🔥 Account:", doc.id, data);
-            
-            // Handle both old accounts (without orderNumbers) and new accounts (with orderNumbers)
+            const data = doc.data() || {};
+            const orderNumbers = Array.isArray(data.orderNumbers) ? data.orderNumbers.slice(0, MAX_ORDER_SLOTS) : Array(MAX_ORDER_SLOTS).fill('');
+            const orderDurations = Array.isArray(data.orderDurations) ? data.orderDurations.slice(0, MAX_ORDER_SLOTS) : Array(MAX_ORDER_SLOTS).fill('1');
+
+            while (orderNumbers.length < MAX_ORDER_SLOTS) orderNumbers.push('');
+            while (orderDurations.length < MAX_ORDER_SLOTS) orderDurations.push('1');
+
             const account = {
                 id: doc.id,
-                client: data.client,
-                email: data.email,
-                date: data.date,
-                orderNumbers: data.orderNumbers || ['', '', '', '', ''] // Default empty order numbers for existing accounts
+                client: data.client || 'Unknown',
+                email: data.email || '',
+                date: data.date || getTodayFormatted(),
+                orderNumbers: orderNumbers,
+                orderDurations: orderDurations
             };
-            
             accounts.push(account);
         });
-        
-        clients = [...new Set(accounts.map(acc => acc.client))].filter(Boolean);
-        
-        console.log('Loaded accounts:', accounts.map(acc => acc.email));
-        
+
+        clients = [...new Set(accounts.map(a => a.client))].filter(Boolean);
         renderAccounts();
         renderExpiringAccounts();
         hideLoading();
-    } catch (error) {
-        console.error('Error loading accounts:', error);
-        showMessage('Error loading accounts', 'error');
+        console.log('Loaded accounts:', accounts.length);
+    } catch (err) {
         hideLoading();
+        console.error('loadAccounts error', err);
+        showMessage('Error loading accounts', 'error');
     }
 }
 
+/**
+ * saveAccount(accountData)
+ * - adds a new document
+ * - returns doc id
+ */
 async function saveAccount(accountData) {
+    if (!db) throw new Error('Firestore not available');
     try {
         const docRef = await db.collection('accounts').add({
             client: accountData.client,
             email: accountData.email,
             date: formatDateForStorage(accountData.date),
-            orderNumbers: accountData.orderNumbers || ['', '', '', '', '']
+            orderNumbers: accountData.orderNumbers || Array(MAX_ORDER_SLOTS).fill(''),
+            orderDurations: accountData.orderDurations || Array(MAX_ORDER_SLOTS).fill('1')
         });
         return docRef.id;
-    } catch (error) {
-        console.error('Error saving account:', error);
-        throw error;
+    } catch (err) {
+        console.error('saveAccount error', err);
+        throw err;
     }
 }
 
+/**
+ * updateAccount(id, accountData)
+ * - updates the document with given id
+ */
 async function updateAccount(id, accountData) {
+    if (!db) throw new Error('Firestore not available');
     try {
         await db.collection('accounts').doc(id).update({
             client: accountData.client,
             email: accountData.email,
             date: formatDateForStorage(accountData.date),
-            orderNumbers: accountData.orderNumbers || ['', '', '', '', '']
+            orderNumbers: accountData.orderNumbers || Array(MAX_ORDER_SLOTS).fill(''),
+            orderDurations: accountData.orderDurations || Array(MAX_ORDER_SLOTS).fill('1')
         });
-    } catch (error) {
-        console.error('Error updating account:', error);
-        throw error;
+    } catch (err) {
+        console.error('updateAccount error', err);
+        throw err;
     }
 }
 
+/**
+ * deleteAccount(id)
+ */
 async function deleteAccount(id) {
+    if (!db) throw new Error('Firestore not available');
     try {
         await db.collection('accounts').doc(id).delete();
-    } catch (error) {
-        console.error('Error deleting account:', error);
-        throw error;
+    } catch (err) {
+        console.error('deleteAccount error', err);
+        throw err;
     }
 }
 
+/**
+ * bulkSaveAccounts(accountsData)
+ * - writes multiple docs in a batch
+ */
 async function bulkSaveAccounts(accountsData) {
+    if (!db) throw new Error('Firestore not available');
     try {
         const batch = db.batch();
-        
-        accountsData.forEach(accountData => {
+        accountsData.forEach(acc => {
             const docRef = db.collection('accounts').doc();
             batch.set(docRef, {
-                client: accountData.client,
-                email: accountData.email,
-                date: formatDateForStorage(accountData.date),
-                orderNumbers: accountData.orderNumbers || ['', '', '', '', '']
+                client: acc.client,
+                email: acc.email,
+                date: formatDateForStorage(acc.date),
+                orderNumbers: acc.orderNumbers || Array(MAX_ORDER_SLOTS).fill(''),
+                orderDurations: acc.orderDurations || Array(MAX_ORDER_SLOTS).fill('1')
             });
         });
-        
         await batch.commit();
-    } catch (error) {
-        console.error('Error bulk saving accounts:', error);
-        throw error;
+    } catch (err) {
+        console.error('bulkSaveAccounts error', err);
+        throw err;
     }
 }
 
-// Search Functions
-function performSearch() {
-    const emailInput = document.getElementById('emailSearchInput').value.trim();
-    const dateQuery = document.getElementById('dateSearchInput').value;
-    const clientQuery = document.getElementById('clientSearchInput').value.trim().toLowerCase();
-    
-    if (!emailInput && !dateQuery && !clientQuery) {
-        clearSearch();
-        return;
-    }
-    
-    // Split input by commas, newlines, or separators, and normalize
-    const emailQueries = emailInput.split(/[\n,\s-]+/)
-        .map(email => email.trim().toLowerCase())
-        .filter(email => {
-            // Validate email format
-            const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-            return email && emailRegex.test(email);
-        });
-    
-    console.log('Search email queries:', emailQueries);
-    console.log('Database emails:', accounts.map(acc => acc.email.toLowerCase()));
-    
-    // First, try to find exact email matches
-    filteredAccounts = accounts.filter(account => {
-        const accountEmail = account.email.toLowerCase().trim();
-        const exactEmailMatch = emailQueries.some(query => accountEmail === query);
-        const partialEmailMatch = emailQueries.some(query => accountEmail.includes(query));
-        const emailMatch = !emailInput || exactEmailMatch || (emailQueries.length > 0 && partialEmailMatch);
-        const dateMatch = !dateQuery || account.date === dateQuery;
-        const clientMatch = !clientQuery || account.client.toLowerCase().includes(clientQuery);
-        
-        return emailMatch && dateMatch && clientMatch;
-    });
-    
-    console.log('Filtered accounts:', filteredAccounts);
-    
-    isSearchActive = true;
-    renderSearchResults();
-    
-    if (filteredAccounts.length === 0) {
-        showMessage('No accounts found matching your search criteria.', 'error');
-    }
-}
+/* ============================================================
+   SECTION: Rendering - Accounts, Clients, Expiring & Search
+   ============================================================ */
 
-function clearSearch() {
-    document.getElementById('emailSearchInput').value = '';
-    document.getElementById('dateSearchInput').value = '';
-    document.getElementById('clientSearchInput').value = '';
-    document.getElementById('searchResults').style.display = 'none';
-    isSearchActive = false;
-    filteredAccounts = [];
-}
-
-function renderSearchResults() {
-    const resultsContainer = document.getElementById('searchResults');
-    const resultsBody = document.getElementById('searchResultsBody');
-    const resultCount = document.getElementById('resultCount');
-    
-    if (filteredAccounts.length === 0) {
-        resultsBody.innerHTML = '<tr><td colspan="5" class="no-data">No accounts found matching your search criteria.</td></tr>';
-        resultCount.textContent = '0 results found';
-        resultsContainer.style.display = 'block';
-        return;
-    }
-    
-    // Group accounts by client
-    const accountsByClient = {};
-    filteredAccounts.forEach(account => {
-        if (!accountsByClient[account.client]) {
-            accountsByClient[account.client] = [];
-        }
-        accountsByClient[account.client].push(account);
-    });
-    
-    // Render search results grouped by client
-    resultsBody.innerHTML = Object.keys(accountsByClient).sort().map(client => `
-        <tr>
-            <td colspan="5" class="client-header">
-                <div class="client-name">${client} (${accountsByClient[client].length} account${accountsByClient[client].length !== 1 ? 's' : ''})</div>
-                <button class="btn btn-copy btn-small" onclick="copyToClipboard('${accountsByClient[client].map(acc => acc.email).join(', ')}')">
-                    Copy All Emails
-                </button>
-            </td>
-        </tr>
-        ${accountsByClient[client].map(account => `
-            <tr class="account-row" data-id="${account.id}">
-                <td>${escapeHtml(account.client)}</td>
-                <td>${escapeHtml(account.email)}</td>
-                <td>${formatDateForDisplay(account.date)}</td>
-                <td>${renderOrderNumbers(account.orderNumbers)}</td>
-                <td>
-                    <div class="action-buttons">
-                        <button class="btn btn-warning btn-small" onclick="editAccount('${account.id}')">
-                            Edit
-                        </button>
-                        <button class="btn btn-danger btn-small" onclick="confirmDeleteAccount('${account.id}')">
-                            Delete
-                        </button>
-                        <button class="btn btn-copy btn-small" onclick="copyToClipboard('${escapeHtml(account.email)}')">
-                            Copy
-                        </button>
-                    </div>
-                </td>
-            </tr>
-        `).join('')}
-    `).join('');
-    
-    resultCount.textContent = `${filteredAccounts.length} result${filteredAccounts.length !== 1 ? 's' : ''} found`;
-    resultsContainer.style.display = 'block';
-}
-
-// Export Functions
-function exportToCSV() {
-    const dataToExport = isSearchActive ? filteredAccounts : accounts;
-    
-    if (dataToExport.length === 0) {
-        showMessage('No accounts to export', 'error');
-        return;
-    }
-    
-    const headers = ['Client', 'Email', 'Expiration Date', 'Order 1', 'Order 2', 'Order 3', 'Order 4', 'Order 5'];
-    const csvContent = [
-        headers.join(','),
-        ...dataToExport.map(account => [
-            `"${account.client}"`,
-            `"${account.email}"`,
-            `"${formatDateForDisplay(account.date)}"`,
-            `"${account.orderNumbers ? account.orderNumbers[0] || '' : ''}"`,
-            `"${account.orderNumbers ? account.orderNumbers[1] || '' : ''}"`,
-            `"${account.orderNumbers ? account.orderNumbers[2] || '' : ''}"`,
-            `"${account.orderNumbers ? account.orderNumbers[3] || '' : ''}"`,
-            `"${account.orderNumbers ? account.orderNumbers[4] || '' : ''}"`
-        ].join(','))
-    ].join('\n');
-    
-    const blob = new Blob([csvContent], { type: 'text/csv' });
-    const url = window.URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `email-accounts-${new Date().toISOString().split('T')[0]}.csv`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    window.URL.revokeObjectURL(url);
-    
-    const exportType = isSearchActive ? 'filtered' : 'all';
-    showMessage(`CSV file with ${exportType} accounts downloaded successfully`);
-}
-
-function exportToExcel() {
-    const dataToExport = isSearchActive ? filteredAccounts : accounts;
-    
-    if (dataToExport.length === 0) {
-        showMessage('No accounts to export', 'error');
-        return;
-    }
-    
-    const excelContent = `<?xml version="1.0"?>
-    <Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet" xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">
-        <Worksheet ss:Name="Email Accounts">
-            <Table>
-                <Row>
-                    <Cell><Data ss:Type="String">Client</Data></Cell>
-                    <Cell><Data ss:Type="String">Email</Data></Cell>
-                    <Cell><Data ss:Type="String">Expiration Date</Data></Cell>
-                    <Cell><Data ss:Type="String">Order 1</Data></Cell>
-                    <Cell><Data ss:Type="String">Order 2</Data></Cell>
-                    <Cell><Data ss:Type="String">Order 3</Data></Cell>
-                    <Cell><Data ss:Type="String">Order 4</Data></Cell>
-                    <Cell><Data ss:Type="String">Order 5</Data></Cell>
-                </Row>
-                ${dataToExport.map(account => `
-                    <Row>
-                        <Cell><Data ss:Type="String">${account.client}</Data></Cell>
-                        <Cell><Data ss:Type="String">${account.email}</Data></Cell>
-                        <Cell><Data ss:Type="String">${formatDateForDisplay(account.date)}</Data></Cell>
-                        <Cell><Data ss:Type="String">${account.orderNumbers ? account.orderNumbers[0] || '' : ''}</Data></Cell>
-                        <Cell><Data ss:Type="String">${account.orderNumbers ? account.orderNumbers[1] || '' : ''}</Data></Cell>
-                        <Cell><Data ss:Type="String">${account.orderNumbers ? account.orderNumbers[2] || '' : ''}</Data></Cell>
-                        <Cell><Data ss:Type="String">${account.orderNumbers ? account.orderNumbers[3] || '' : ''}</Data></Cell>
-                        <Cell><Data ss:Type="String">${account.orderNumbers ? account.orderNumbers[4] || '' : ''}</Data></Cell>
-                    </Row>
-                `).join('')}
-            </Table>
-        </Worksheet>
-    </Workbook>`;
-    
-    const blob = new Blob([excelContent], { type: 'application/vnd.ms-excel' });
-    const url = window.URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `email-accounts-${new Date().toISOString().split('T')[0]}.xls`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    window.URL.revokeObjectURL(url);
-    
-    const exportType = isSearchActive ? 'filtered' : 'all';
-    showMessage(`Excel file with ${exportType} accounts downloaded successfully`);
-}
-
-function exportToJSON() {
-    const dataToExport = isSearchActive ? filteredAccounts : accounts;
-    
-    if (dataToExport.length === 0) {
-        showMessage('No accounts to export', 'error');
-        return;
-    }
-    
-    const jsonContent = JSON.stringify(dataToExport.map(account => ({
-        client: account.client,
-        email: account.email,
-        expirationDate: formatDateForDisplay(account.date),
-        rawDate: account.date,
-        orderNumbers: account.orderNumbers || ['', '', '', '', '']
-    })), null, 2);
-    
-    const blob = new Blob([jsonContent], { type: 'application/json' });
-    const url = window.URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `email-accounts-${new Date().toISOString().split('T')[0]}.json`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    window.URL.revokeObjectURL(url);
-    
-    const exportType = isSearchActive ? 'filtered' : 'all';
-    showMessage(`JSON file with ${exportType} accounts downloaded successfully`);
-}
-
-// Rendering Functions
+/**
+ * renderAccounts()
+ * - builds the clients container with tables grouped by client
+ */
 function renderAccounts() {
     const container = document.getElementById('clientsContainer');
+    if (!container) return;
     container.innerHTML = '';
-    
-    const accountsByClient = {};
-    accounts.forEach(account => {
-        if (!accountsByClient[account.client]) {
-            accountsByClient[account.client] = [];
-        }
-        accountsByClient[account.client].push(account);
-    });
-    
-    Object.keys(accountsByClient).sort().forEach(client => {
-        const clientSection = createClientSection(client, accountsByClient[client]);
-        container.appendChild(clientSection);
-    });
-    
-    if (Object.keys(accountsByClient).length === 0) {
-        container.innerHTML = '<div class="no-data">No accounts found. Add your first client to get started!</div>';
-    }
-}
 
-function createClientSection(clientName, clientAccounts) {
-    const isExpanded = expandedClients.has(clientName);
-    const displayAccounts = isExpanded ? clientAccounts : clientAccounts.slice(0, 5);
-    const showToggle = clientAccounts.length > 5;
-    
-    const section = document.createElement('div');
-    section.className = 'client-section';
-    section.innerHTML = `
-        <div class="client-header">
-            <div class="client-name">${clientName} (${clientAccounts.length} account${clientAccounts.length !== 1 ? 's' : ''})</div>
+    // group accounts by client
+    const groups = {};
+    accounts.forEach(acc => {
+        if (!groups[acc.client]) groups[acc.client] = [];
+        groups[acc.client].push(acc);
+    });
+
+    const clientNames = Object.keys(groups).sort((a,b) => a.localeCompare(b));
+    if (clientNames.length === 0) {
+        container.innerHTML = '<div class="no-data">No accounts found. Add your first client!</div>';
+        return;
+    }
+
+    clientNames.forEach(clientName => {
+        const clientAccounts = groups[clientName];
+        const section = document.createElement('section');
+        section.className = 'client-section';
+        const isExpanded = expandedClients.has(clientName);
+        const displayAccounts = isExpanded ? clientAccounts : clientAccounts.slice(0, 5);
+        const showToggle = clientAccounts.length > 5;
+
+        // header
+        const header = document.createElement('div');
+        header.className = 'client-header';
+        header.innerHTML = `
+            <div class="client-name">${escapeHtml(clientName)} (${clientAccounts.length} account${clientAccounts.length !== 1 ? 's' : ''})</div>
             <div class="client-actions">
-                <button class="btn btn-success btn-small" onclick="addNewAccount('${clientName}')">
-                    + Add New Account
-                </button>
-                <button class="btn btn-primary btn-small" onclick="openBulkUpload('${clientName}')">
-                    + Bulk Upload Emails
-                </button>
-                <button class="btn btn-copy btn-small" onclick="copyToClipboard('${clientAccounts.map(acc => acc.email).join(', ')}')">
-                    Copy All Emails
-                </button>
+                <button class="btn" onclick="addNewAccount('${escapeForJs(clientName)}')">+ Add New Account</button>
+                <button class="btn" onclick="openBulkUpload('${escapeForJs(clientName)}')">+ Bulk Upload Emails</button>
+                <button class="btn" onclick="copyToClipboardSafe('${clientAccounts.map(a => a.email).join(', ')}','Copied all emails')">Copy All Emails</button>
             </div>
-        </div>
-        <div class="table-container" style="max-height: ${showToggle && !isExpanded ? '300px' : 'none'}; overflow-y: ${showToggle && !isExpanded ? 'auto' : 'visible'};">
-            <table>
-                <thead>
-                    <tr>
-                        <th>Email</th>
-                        <th>Expiration Date</th>
-                        <th>Order Numbers</th>
-                        <th>Actions</th>
-                    </tr>
-                </thead>
-                <tbody id="client-${clientName.replace(/\s+/g, '-')}">
-                    ${displayAccounts.map(account => createAccountRow(account)).join('')}
-                </tbody>
-            </table>
-        </div>
-        ${showToggle ? `
-            <div class="toggle-container" style="text-align: center; margin-top: 10px;">
-                <button class="btn btn-primary btn-small" onclick="toggleClientAccounts('${clientName}')">
-                    ${isExpanded ? 'Show Less' : 'Show More'}
-                </button>
-            </div>
-        ` : ''}
-    `;
-    
-    return section;
+        `;
+
+        // table
+        const table = document.createElement('div');
+        table.className = 'table-container';
+        const innerTable = document.createElement('table');
+        innerTable.innerHTML = `
+            <thead>
+                <tr>
+                    <th>Email</th>
+                    <th>Expiration Date</th>
+                    <th>Order Numbers</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody id="client-${escapeHtml(clientName).replace(/\s+/g,'-')}">
+            </tbody>
+        `;
+        table.appendChild(innerTable);
+
+        section.appendChild(header);
+        section.appendChild(table);
+
+        // append rows
+        const tbody = innerTable.querySelector('tbody');
+        displayAccounts.forEach(account => {
+            const tr = document.createElement('tr');
+            tr.className = 'account-row';
+            tr.dataset.id = account.id;
+            tr.innerHTML = `
+                <td class="email-cell">${escapeHtml(account.email)}</td>
+                <td class="date-cell">${formatDateForDisplay(account.date)}</td>
+                <td class="orders-cell">${renderOrderNumbers(account.orderNumbers, account.orderDurations)}</td>
+                <td class="actions-cell">
+                    <div class="action-buttons">
+                        <button class="btn" onclick="editAccount('${escapeForJs(account.id)}')">Edit</button>
+                        <button class="btn btn-danger" onclick="confirmDeleteAccount('${escapeForJs(account.id)}')">Delete</button>
+                        <button class="btn" onclick="copyToClipboardSafe('${escapeHtml(account.email)}')">Copy</button>
+                        <button class="btn" onclick="openMoveEmailModal('${escapeForJs(account.id)}')">Move Email</button>
+                    </div>
+                </td>
+            `;
+            tbody.appendChild(tr);
+        });
+
+        // show toggle
+        if (showToggle) {
+            const toggleDiv = document.createElement('div');
+            toggleDiv.className = 'toggle-container';
+            toggleDiv.innerHTML = `<button class="btn" onclick="toggleClientAccounts('${escapeForJs(clientName)}')">${isExpanded ? 'Show Less' : 'Show More'}</button>`;
+            section.appendChild(toggleDiv);
+        }
+
+        container.appendChild(section);
+    });
 }
 
+/**
+ * toggleClientAccounts(clientName)
+ */
 function toggleClientAccounts(clientName) {
-    if (expandedClients.has(clientName)) {
-        expandedClients.delete(clientName);
-    } else {
-        expandedClients.add(clientName);
-    }
+    if (expandedClients.has(clientName)) expandedClients.delete(clientName);
+    else expandedClients.add(clientName);
     renderAccounts();
 }
 
-function createAccountRow(account) {
-    return `
-        <tr class="account-row" data-id="${account.id}">
-            <td class="email-cell">${account.email}</td>
-            <td class="date-cell">${formatDateForDisplay(account.date)}</td>
-            <td class="orders-cell">${renderOrderNumbers(account.orderNumbers)}</td>
-            <td class="actions-cell">
-                <div class="action-buttons">
-                    <button class="btn btn-warning btn-small" onclick="editAccount('${account.id}')">
-                        Edit
-                    </button>
-                    <button class="btn btn-danger btn-small" onclick="confirmDeleteAccount('${account.id}')">
-                        Delete
-                    </button>
-                    <button class="btn btn-copy btn-small" onclick="copyToClipboard('${account.email}')">
-                        Copy
-                    </button>
-                </div>
-            </td>
-        </tr>
-    `;
-}
-
+/**
+ * renderExpiringAccounts()
+ * - shows accounts whose date is tomorrow
+ */
 function renderExpiringAccounts() {
     const tomorrow = getTomorrowFormatted();
-    const expiringAccounts = accounts.filter(account => account.date === tomorrow);
-    
+    const expiring = accounts.filter(acc => acc.date === tomorrow);
     const tbody = document.getElementById('expiringTableBody');
-    const noDataDiv = document.getElementById('noExpiringAccounts');
-    
-    if (expiringAccounts.length === 0) {
+    const noDiv = document.getElementById('noExpiringAccounts');
+    if (!tbody) return;
+
+    if (expiring.length === 0) {
         tbody.innerHTML = '';
-        noDataDiv.style.display = 'block';
+        if (noDiv) noDiv.style.display = 'block';
     } else {
-        noDataDiv.style.display = 'none';
-        tbody.innerHTML = expiringAccounts.map(account => `
-            <tr class="account-row">
-                <td>${account.client}</td>
-                <td>${account.email}</td>
-                <td>${formatDateForDisplay(account.date)}</td>
-                <td>${renderOrderNumbers(account.orderNumbers)}</td>
+        if (noDiv) noDiv.style.display = 'none';
+        tbody.innerHTML = expiring.map(acc => `
+            <tr class="account-row" data-id="${escapeHtml(acc.id)}">
+                <td>${escapeHtml(acc.client)}</td>
+                <td>${escapeHtml(acc.email)}</td>
+                <td>${formatDateForDisplay(acc.date)}</td>
+                <td>${renderOrderNumbers(acc.orderNumbers, acc.orderDurations)}</td>
                 <td>
                     <div class="action-buttons">
-                        <button class="btn btn-warning btn-small" onclick="editAccount('${account.id}')">
-                            Edit
-                        </button>
-                        <button class="btn btn-danger btn-small" onclick="confirmDeleteAccount('${account.id}')">
-                            Delete
-                        </button>
-                        <button class="btn btn-copy btn-small" onclick="copyToClipboard('${account.email}')">
-                            Copy
-                        </button>
+                        <button class="btn" onclick="editAccount('${escapeForJs(acc.id)}')">Edit</button>
+                        <button class="btn btn-danger" onclick="confirmDeleteAccount('${escapeForJs(acc.id)}')">Delete</button>
+                        <button class="btn" onclick="copyToClipboardSafe('${escapeHtml(acc.email)}')">Copy</button>
+                        <button class="btn" onclick="openMoveEmailModal('${escapeForJs(acc.id)}')">Move Email</button>
                     </div>
                 </td>
             </tr>
@@ -780,688 +548,867 @@ function renderExpiringAccounts() {
     }
 }
 
-// Account Management Functions - FIXED EDIT FUNCTIONALITY
+/**
+ * renderSearchResults()
+ * - shows filteredAccounts grouped by client
+ */
+function renderSearchResults() {
+    const container = document.getElementById('searchResults');
+    const body = document.getElementById('searchResultsBody');
+    const countEl = document.getElementById('resultCount');
+    if (!container || !body || !countEl) return;
+
+    if (!filteredAccounts || filteredAccounts.length === 0) {
+        body.innerHTML = '<tr><td colspan="5" class="no-data">No accounts found matching your search.</td></tr>';
+        countEl.textContent = '0 results';
+        container.style.display = 'block';
+        return;
+    }
+
+    // group filtered by client
+    const groups = {};
+    filteredAccounts.forEach(acc => {
+        if (!groups[acc.client]) groups[acc.client] = [];
+        groups[acc.client].push(acc);
+    });
+
+    const htmlParts = [];
+    Object.keys(groups).sort().forEach(client => {
+        htmlParts.push(`
+            <tr><td colspan="5" class="client-header">
+                <div class="client-name">${escapeHtml(client)} (${groups[client].length})</div>
+                <div><button class="btn" onclick="copyToClipboardSafe('${groups[client].map(a=>a.email).join(', ')}','Copied client emails')">Copy All</button></div>
+            </td></tr>
+        `);
+        groups[client].forEach(account => {
+            htmlParts.push(`
+                <tr class="account-row" data-id="${escapeHtml(account.id)}">
+                    <td>${escapeHtml(account.client)}</td>
+                    <td>${escapeHtml(account.email)}</td>
+                    <td>${formatDateForDisplay(account.date)}</td>
+                    <td>${renderOrderNumbers(account.orderNumbers, account.orderDurations)}</td>
+                    <td>
+                        <div class="action-buttons">
+                            <button class="btn" onclick="editAccount('${escapeForJs(account.id)}')">Edit</button>
+                            <button class="btn btn-danger" onclick="confirmDeleteAccount('${escapeForJs(account.id)}')">Delete</button>
+                            <button class="btn" onclick="copyToClipboardSafe('${escapeHtml(account.email)}')">Copy</button>
+                            <button class="btn" onclick="openMoveEmailModal('${escapeForJs(account.id)}')">Move Email</button>
+                        </div>
+                    </td>
+                </tr>
+            `);
+        });
+    });
+
+    body.innerHTML = htmlParts.join('');
+    countEl.textContent = `${filteredAccounts.length} result${filteredAccounts.length !== 1 ? 's' : ''} found`;
+    container.style.display = 'block';
+}
+
+/* ============================================================
+   SECTION: Account Add / Edit / Save / Cancel / Delete
+   ============================================================ */
+
+/**
+ * addNewAccount(clientName)
+ * - inserts a new editable row for adding an account under the client
+ */
 function addNewAccount(clientName) {
-    const tbody = document.getElementById(`client-${clientName.replace(/\s+/g, '-')}`);
+    const tbodyId = `client-${escapeHtml(clientName).replace(/\s+/g,'-')}`;
+    const tbody = document.getElementById(tbodyId);
+    // If tbody not present (client group not visible), just call renderAccounts then open edit for newly created placeholder
+    if (!tbody) {
+        // create placeholder account then edit
+        (async () => {
+            try {
+                showLoading();
+                const placeholder = {
+                    client: clientName,
+                    email: `example+${Date.now()}@example.com`,
+                    date: getTodayFormatted(),
+                    orderNumbers: Array(MAX_ORDER_SLOTS).fill(''),
+                    orderDurations: Array(MAX_ORDER_SLOTS).fill('1')
+                };
+                const id = await saveAccount(placeholder);
+                accounts.push({ id, ...placeholder });
+                if (!clients.includes(clientName)) clients.push(clientName);
+                hideLoading();
+                renderAccounts();
+                editAccount(id);
+            } catch (err) {
+                hideLoading();
+                console.error('addNewAccount fallback error', err);
+                showMessage('Error adding placeholder account', 'error');
+            }
+        })();
+        return;
+    }
+
+    // create a new row in the client tbody for immediate input
     const newRow = document.createElement('tr');
-    newRow.className = 'account-row editing-row';
+    newRow.className = 'editing-row';
     newRow.innerHTML = `
-        <td>
-            <input type="email" class="new-email" placeholder="Enter email" required>
-        </td>
-        <td>
-            <input type="date" class="new-date" value="${getTodayFormatted()}">
-        </td>
-        <td>
-            ${renderOrderInputs(['', '', '', '', ''], 'new')}
-        </td>
+        <td><input type="email" class="new-email" placeholder="Enter email"></td>
+        <td><input type="date" class="new-date" value="${getTodayFormatted()}"></td>
+        <td>${renderOrderInputs(Array(MAX_ORDER_SLOTS).fill(''), Array(MAX_ORDER_SLOTS).fill('1'), 'new')}</td>
         <td>
             <div class="action-buttons">
-                <button class="btn btn-success btn-small" onclick="saveNewAccount('${clientName}', this)">
-                    Save
-                </button>
-                <button class="btn btn-secondary btn-small" onclick="cancelNewAccount(this)">
-                    Cancel
-                </button>
+                <button class="btn" onclick="saveNewAccount('${escapeForJs(clientName)}', this)">Save</button>
+                <button class="btn btn-secondary" onclick="cancelNewAccount(this)">Cancel</button>
             </div>
         </td>
     `;
-    
     tbody.appendChild(newRow);
-    newRow.querySelector('.new-email').focus();
+    const input = newRow.querySelector('.new-email');
+    if (input) { input.focus(); input.select(); }
 }
 
-// Input validation functions
-function validateEmail(email) {
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    return emailRegex.test(email);
-}
-
-function validateDate(dateString) {
-    if (!dateString) return true; // Empty dates are OK
-    const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
-    if (!dateRegex.test(dateString)) return false;
-    
-    const date = new Date(dateString);
-    return date instanceof Date && !isNaN(date);
-}
-
-function sanitizeOrderNumber(orderNum) {
-    // Remove potentially dangerous characters, keep only alphanumeric, spaces, hyphens, underscores
-    return String(orderNum || '').replace(/[^a-zA-Z0-9\s\-_]/g, '').trim().substring(0, 50);
-}
-
+/**
+ * saveNewAccount(clientName, button)
+ */
 async function saveNewAccount(clientName, button) {
     const row = button.closest('tr');
-    const email = row.querySelector('.new-email').value.trim();
-    const date = row.querySelector('.new-date').value;
+    if (!row) return;
+    const emailEl = row.querySelector('.new-email');
+    const dateEl = row.querySelector('.new-date');
     const orderInputs = row.querySelectorAll('.order-input');
-    const orderNumbers = Array.from(orderInputs).map(input => sanitizeOrderNumber(input.value));
-    
-    if (!email) {
-        showMessage('Please enter an email address', 'error');
-        return;
-    }
-    
-    if (!validateEmail(email)) {
-        showMessage('Please enter a valid email address', 'error');
-        return;
-    }
-    
-    if (!validateDate(date)) {
-        showMessage('Please enter a valid date', 'error');
-        return;
-    }
-    
+    const durationSelects = row.querySelectorAll('.order-duration');
+
+    const email = emailEl ? emailEl.value.trim() : '';
+    const date = dateEl ? dateEl.value : getTodayFormatted();
+
+    if (!email) { showMessage('Please enter an email', 'error'); return; }
+    if (!validateEmail(email)) { showMessage('Invalid email', 'error'); return; }
+    if (!validateDate(date)) { showMessage('Invalid date', 'error'); return; }
+
+    const orderNumbers = Array.from(orderInputs).map(inp => sanitizeOrderNumber(inp.value));
+    while (orderNumbers.length < MAX_ORDER_SLOTS) orderNumbers.push('');
+    const orderDurations = Array.from(durationSelects).map(sel => sel.value || '1');
+    while (orderDurations.length < MAX_ORDER_SLOTS) orderDurations.push('1');
+
+    const accountData = {
+        client: clientName,
+        email: email,
+        date: date,
+        orderNumbers: orderNumbers,
+        orderDurations: orderDurations
+    };
+
     try {
         showLoading();
-        const accountData = {
-            client: sanitizeForHTML(clientName),
-            email: sanitizeForHTML(email),
-            date: date || getTodayFormatted(),
-            orderNumbers: orderNumbers
-        };
-        
         const id = await saveAccount(accountData);
         accounts.push({ id, ...accountData });
-        
+        if (!clients.includes(clientName)) clients.push(clientName);
         hideLoading();
         showMessage('Account added successfully');
         renderAccounts();
+        if (isSearchActive) performSearch();
         renderExpiringAccounts();
-        
-        if (isSearchActive) {
-            performSearch();
-        }
-    } catch (error) {
+    } catch (err) {
         hideLoading();
-        showMessage('Error adding account', 'error');
-        console.error('Save error:', error);
+        console.error('saveNewAccount error', err);
+        showMessage('Error saving account', 'error');
     }
 }
 
+/**
+ * cancelNewAccount(button)
+ */
 function cancelNewAccount(button) {
     const row = button.closest('tr');
-    row.remove();
+    if (row) row.remove();
 }
 
-// COMPLETELY REWRITTEN EDIT FUNCTION - FIXED
+/**
+ * editAccount(id)
+ * - converts an existing row to editable form
+ */
 function editAccount(id) {
-    const account = accounts.find(acc => acc.id === id);
+    const account = accounts.find(a => a.id === id);
     if (!account) {
         showMessage('Account not found', 'error');
         return;
     }
 
-    let row = null;
-
-    // Try multiple ways to find the row
-    if (isSearchActive) {
-        // First try with data-id attribute in search results
-        row = document.querySelector(`#searchResultsBody tr.account-row[data-id="${id}"]`);
-        
-        // If not found, try searching through all rows in search results
-        if (!row) {
-            const searchRows = document.querySelectorAll('#searchResultsBody tr.account-row');
-            for (let r of searchRows) {
-                const editBtn = r.querySelector(`button[onclick="editAccount('${id}')"]`);
-                if (editBtn) {
-                    row = r;
-                    break;
-                }
-            }
-        }
-    } else {
-        // For main table, try with data-id first
-        row = document.querySelector(`tr.account-row[data-id="${id}"]`);
-        
-        // If not found, search through all account rows
-        if (!row) {
-            const allRows = document.querySelectorAll('tr.account-row');
-            for (let r of allRows) {
-                const editBtn = r.querySelector(`button[onclick="editAccount('${id}')"]`);
-                if (editBtn) {
-                    row = r;
-                    break;
-                }
-            }
-        }
-    }
-
+    // find the row in search results or main view
+    let row = document.querySelector(`#searchResultsBody tr.account-row[data-id="${id}"]`);
+    if (!row) row = document.querySelector(`tr.account-row[data-id="${id}"]`);
     if (!row) {
-        console.error(`Could not find row for account ID: ${id}`);
-        console.log('Available rows:', document.querySelectorAll('tr.account-row'));
-        showMessage('Could not find account to edit. Please refresh and try again.', 'error');
-        return;
-    }
-
-    // Add debugging
-    console.log('Found row for editing:', row);
-    console.log('Row HTML:', row.innerHTML);
-
-    // Identify cells based on their position in the row
-    const cells = Array.from(row.querySelectorAll('td'));
-    console.log('Number of cells:', cells.length);
-
-    let emailCell, dateCell, ordersCell, actionsCell;
-
-    if (isSearchActive) {
-        // In search results: Client(0), Email(1), Date(2), Orders(3), Actions(4)
-        if (cells.length >= 5) {
-            emailCell = cells[1];
-            dateCell = cells[2];
-            ordersCell = cells[3];
-            actionsCell = cells[4];
-        }
-    } else {
-        // In main table: Email(0), Date(1), Orders(2), Actions(3)
-        if (cells.length >= 4) {
-            emailCell = cells[0];
-            dateCell = cells[1];
-            ordersCell = cells[2];
-            actionsCell = cells[3];
+        // fallback: re-render and then find again
+        renderAccounts();
+        row = document.querySelector(`tr.account-row[data-id="${id}"]`);
+        if (!row) {
+            showMessage('Could not find account row to edit', 'error');
+            return;
         }
     }
+
+    // save original in data attributes for cancel
+    row.dataset.originalEmail = row.querySelector('.email-cell') ? row.querySelector('.email-cell').innerText : (account.email || '');
+    row.dataset.originalDate = row.querySelector('.date-cell') ? row.querySelector('.date-cell').innerText : formatDateForDisplay(account.date);
+    row.dataset.originalOrders = row.querySelector('.orders-cell') ? row.querySelector('.orders-cell').innerHTML : renderOrderNumbers(account.orderNumbers, account.orderDurations);
+    row.dataset.originalActions = row.querySelector('.actions-cell') ? row.querySelector('.actions-cell').innerHTML : '';
+
+    // build edit UI
+    const emailCell = row.querySelector('.email-cell') || row.children[0];
+    const dateCell = row.querySelector('.date-cell') || row.children[1];
+    const ordersCell = row.querySelector('.orders-cell') || row.children[2];
+    const actionsCell = row.querySelector('.actions-cell') || row.children[3];
 
     if (!emailCell || !dateCell || !ordersCell || !actionsCell) {
-        console.error('Could not identify table cells for editing');
-        console.log('Cells found:', { emailCell, dateCell, ordersCell, actionsCell });
-        showMessage('Error preparing edit form', 'error');
+        showMessage('Edit failed: table structure unexpected', 'error');
         return;
     }
 
-    // Store original content for cancel functionality
-    row.dataset.originalEmail = emailCell.textContent || emailCell.innerText;
-    row.dataset.originalDate = dateCell.textContent || dateCell.innerText;
-    row.dataset.originalOrders = ordersCell.innerHTML;
-    row.dataset.originalActions = actionsCell.innerHTML;
-
-    // Create the edit form
     emailCell.innerHTML = `<input type="email" class="edit-email" value="${escapeHtml(account.email)}">`;
-    dateCell.innerHTML = `<input type="date" class="edit-date" value="${account.date}">`;
-    ordersCell.innerHTML = renderOrderInputs(account.orderNumbers, id);
-    actionsCell.innerHTML = `
-        <div class="action-buttons">
-            <button class="btn btn-success btn-small" onclick="saveAccountEdit('${id}')">
-                Save
-            </button>
-            <button class="btn btn-secondary btn-small" onclick="cancelAccountEdit('${id}')">
-                Cancel
-            </button>
-        </div>
-    `;
-
+    dateCell.innerHTML = `<input type="date" class="edit-date" value="${account.date || getTodayFormatted()}">`;
+    ordersCell.innerHTML = renderOrderInputs(account.orderNumbers, account.orderDurations, account.id);
+    actionsCell.innerHTML = `<div class="action-buttons"><button class="btn" onclick="saveAccountEdit('${escapeForJs(account.id)}')">Save</button><button class="btn btn-secondary" onclick="cancelAccountEdit('${escapeForJs(account.id)}')">Cancel</button></div>`;
     row.classList.add('editing-row');
-    
-    // Focus on email input
-    const emailInput = row.querySelector('.edit-email');
-    if (emailInput) {
-        emailInput.focus();
-        emailInput.select();
-    }
+    const e = row.querySelector('.edit-email');
+    if (e) { e.focus(); e.select(); }
 }
 
+/**
+ * saveAccountEdit(id)
+ */
 async function saveAccountEdit(id) {
-    // Find the row in either search results or main table
+    // find the row
     let row = document.querySelector(`#searchResultsBody tr.account-row[data-id="${id}"]`);
-    if (!row) {
-        row = document.querySelector(`tr.account-row[data-id="${id}"]`);
-    }
-    
-    // Fallback search
-    if (!row) {
-        const allRows = document.querySelectorAll('tr.account-row');
-        for (let r of allRows) {
-            const saveBtn = r.querySelector(`button[onclick="saveAccountEdit('${id}')"]`);
-            if (saveBtn) {
-                row = r;
-                break;
-            }
-        }
-    }
-    
+    if (!row) row = document.querySelector(`tr.account-row[data-id="${id}"]`);
     if (!row) {
         showMessage('Could not find account row to save', 'error');
         return;
     }
-
-    const emailInput = row.querySelector('.edit-email');
-    const dateInput = row.querySelector('.edit-date');
+    const emailEl = row.querySelector('.edit-email');
+    const dateEl = row.querySelector('.edit-date');
     const orderInputs = row.querySelectorAll('.order-input');
+    const durationSelects = row.querySelectorAll('.order-duration');
 
-    if (!emailInput || !dateInput) {
-        showMessage('Error: Edit form elements not found', 'error');
-        return;
-    }
+    if (!emailEl || !dateEl) { showMessage('Edit fields missing', 'error'); return; }
+    const email = emailEl.value.trim();
+    const date = dateEl.value;
 
-    const email = emailInput.value.trim();
-    const date = dateInput.value;
-    const orderNumbers = Array.from(orderInputs).map(input => sanitizeOrderNumber(input.value));
+    if (!validateEmail(email)) { showMessage('Invalid email', 'error'); return; }
+    if (!validateDate(date)) { showMessage('Invalid date', 'error'); return; }
 
-    if (!email || !validateEmail(email)) {
-        showMessage('Please enter a valid email address', 'error');
-        return;
-    }
-    if (!validateDate(date)) {
-        showMessage('Please enter a valid date', 'error');
-        return;
-    }
+    const orderNumbers = Array.from(orderInputs).map(i => sanitizeOrderNumber(i.value));
+    while (orderNumbers.length < MAX_ORDER_SLOTS) orderNumbers.push('');
+    const orderDurations = Array.from(durationSelects).map(s => s.value || '1');
+    while (orderDurations.length < MAX_ORDER_SLOTS) orderDurations.push('1');
+
+    const account = accounts.find(a => a.id === id);
+    if (!account) { showMessage('Account not found in memory', 'error'); return; }
+
+    const updated = {
+        client: account.client,
+        email: email,
+        date: date || getTodayFormatted(),
+        orderNumbers: orderNumbers,
+        orderDurations: orderDurations
+    };
 
     try {
         showLoading();
-        const account = accounts.find(acc => acc.id === id);
-        const updatedData = {
-            client: sanitizeForHTML(account.client),
-            email: sanitizeForHTML(email),
-            date: date || getTodayFormatted(),
-            orderNumbers: orderNumbers
-        };
-        await updateAccount(id, updatedData);
-        Object.assign(account, updatedData);
+        await updateAccount(id, updated);
+        // update local model
+        Object.assign(account, updated);
         hideLoading();
-        showMessage('Account updated successfully');
-        
-        // Re-render based on current mode
-        if (isSearchActive) {
-            renderSearchResults(); // Stay in search results
-        } else {
-            renderAccounts(); // Update main view
-        }
-        renderExpiringAccounts(); // Always update expiring accounts
-    } catch (error) {
+        showMessage('Account updated');
+        if (isSearchActive) renderSearchResults(); else renderAccounts();
+        renderExpiringAccounts();
+    } catch (err) {
         hideLoading();
+        console.error('saveAccountEdit error', err);
         showMessage('Error updating account', 'error');
-        console.error('Update error:', error);
     }
 }
 
-// REWRITTEN CANCEL FUNCTION
+/**
+ * cancelAccountEdit(id)
+ */
 function cancelAccountEdit(id) {
-    let row = null;
-
-    // Find the row being edited
-    if (isSearchActive) {
-        row = document.querySelector(`#searchResultsBody tr.account-row[data-id="${id}"]`);
-        if (!row) {
-            const searchRows = document.querySelectorAll('#searchResultsBody tr.account-row');
-            for (let r of searchRows) {
-                const saveBtn = r.querySelector(`button[onclick="saveAccountEdit('${id}')"]`);
-                if (saveBtn) {
-                    row = r;
-                    break;
-                }
-            }
-        }
-    } else {
-        row = document.querySelector(`tr.account-row[data-id="${id}"]`);
-        if (!row) {
-            const allRows = document.querySelectorAll('tr.account-row');
-            for (let r of allRows) {
-                const saveBtn = r.querySelector(`button[onclick="saveAccountEdit('${id}')"]`);
-                if (saveBtn) {
-                    row = r;
-                    break;
-                }
-            }
-        }
-    }
-
+    // try to find row
+    let row = document.querySelector(`#searchResultsBody tr.account-row[data-id="${id}"]`);
+    if (!row) row = document.querySelector(`tr.account-row[data-id="${id}"]`);
     if (!row) {
-        // Fallback: re-render the appropriate view
-        if (isSearchActive) {
-            renderSearchResults();
-        } else {
-            renderAccounts();
-        }
+        if (isSearchActive) renderSearchResults(); else renderAccounts();
         return;
     }
 
-    // Restore original content if available
-    const cells = Array.from(row.querySelectorAll('td'));
-    let emailCell, dateCell, ordersCell, actionsCell;
-
-    if (isSearchActive && cells.length >= 5) {
-        emailCell = cells[1];
-        dateCell = cells[2];
-        ordersCell = cells[3];
-        actionsCell = cells[4];
-    } else if (!isSearchActive && cells.length >= 4) {
-        emailCell = cells[0];
-        dateCell = cells[1];
-        ordersCell = cells[2];
-        actionsCell = cells[3];
+    const account = accounts.find(a => a.id === id);
+    if (account) {
+        const emailCell = row.querySelector('.email-cell') || row.children[0];
+        const dateCell = row.querySelector('.date-cell') || row.children[1];
+        const ordersCell = row.querySelector('.orders-cell') || row.children[2];
+        const actionsCell = row.querySelector('.actions-cell') || row.children[3];
+        if (emailCell) emailCell.innerHTML = escapeHtml(account.email);
+        if (dateCell) dateCell.innerHTML = formatDateForDisplay(account.date);
+        if (ordersCell) ordersCell.innerHTML = renderOrderNumbers(account.orderNumbers, account.orderDurations);
+        if (actionsCell) actionsCell.innerHTML = `
+            <div class="action-buttons">
+                <button class="btn" onclick="editAccount('${escapeForJs(account.id)}')">Edit</button>
+                <button class="btn btn-danger" onclick="confirmDeleteAccount('${escapeForJs(account.id)}')">Delete</button>
+                <button class="btn" onclick="copyToClipboardSafe('${escapeHtml(account.email)}')">Copy</button>
+                <button class="btn" onclick="openMoveEmailModal('${escapeForJs(account.id)}')">Move Email</button>
+            </div>
+        `;
+    } else {
+        // if account not found, re-render overall
+        if (isSearchActive) renderSearchResults(); else renderAccounts();
     }
-
-    if (emailCell && dateCell && ordersCell && actionsCell) {
-        // Restore original content
-        const account = accounts.find(acc => acc.id === id);
-        if (account) {
-            emailCell.innerHTML = account.email;
-            dateCell.innerHTML = formatDateForDisplay(account.date);
-            ordersCell.innerHTML = renderOrderNumbers(account.orderNumbers);
-            actionsCell.innerHTML = `
-                <div class="action-buttons">
-                    <button class="btn btn-warning btn-small" onclick="editAccount('${account.id}')">
-                        Edit
-                    </button>
-                    <button class="btn btn-danger btn-small" onclick="confirmDeleteAccount('${account.id}')">
-                        Delete
-                    </button>
-                    <button class="btn btn-copy btn-small" onclick="copyToClipboard('${account.email}')">
-                        Copy
-                    </button>
-                </div>
-            `;
-        }
-    }
-
     row.classList.remove('editing-row');
-    
-    // Clean up stored data
-    delete row.dataset.originalEmail;
-    delete row.dataset.originalDate;
-    delete row.dataset.originalOrders;
-    delete row.dataset.originalActions;
 }
 
-// DELETE FUNCTION
+/**
+ * confirmDeleteAccount(id)
+ */
 function confirmDeleteAccount(id) {
-    const account = accounts.find(acc => acc.id === id);
-    if (!account) {
-        showMessage('Account not found', 'error');
-        return;
-    }
-    
-    showConfirmModal(
-        `Are you sure you want to delete the account for ${account.email}?`,
-        () => deleteAccountConfirmed(id)
-    );
+    const account = accounts.find(a => a.id === id);
+    if (!account) { showMessage('Account not found', 'error'); return; }
+    showConfirmModal(`Delete account for ${account.email}?`, () => deleteAccountConfirmed(id));
 }
 
+/**
+ * deleteAccountConfirmed(id)
+ */
 async function deleteAccountConfirmed(id) {
     try {
         showLoading();
         await deleteAccount(id);
-        
-        accounts = accounts.filter(acc => acc.id !== id);
-        
+        accounts = accounts.filter(a => a.id !== id);
         hideLoading();
-        showMessage('Account deleted successfully');
+        showMessage('Account deleted');
         renderAccounts();
+        if (isSearchActive) performSearch();
         renderExpiringAccounts();
-        
-        if (isSearchActive) {
-            performSearch();
-        }
-    } catch (error) {
+    } catch (err) {
         hideLoading();
+        console.error('deleteAccountConfirmed error', err);
         showMessage('Error deleting account', 'error');
     }
 }
 
-// Bulk Upload Functions
+/* ============================================================
+   SECTION: Bulk Upload Handlers
+   ============================================================ */
+
+/**
+ * openBulkUpload(clientName)
+ */
 function openBulkUpload(clientName) {
     currentBulkClient = clientName;
     const modal = document.getElementById('bulkUploadModal');
     const input = document.getElementById('bulkEmailInput');
-    
-    input.value = '';
-    modal.style.display = 'block';
-    input.focus();
+    if (input) input.value = '';
+    if (modal) modal.style.display = 'block';
 }
 
+/**
+ * closeBulkUploadModal()
+ */
+function closeBulkUploadModal() {
+    currentBulkClient = null;
+    const modal = document.getElementById('bulkUploadModal');
+    if (modal) modal.style.display = 'none';
+}
+
+/**
+ * processBulkUpload()
+ * Accepts lines:
+ * email
+ * email,YYYY-MM-DD
+ * email,YYYY-MM-DD,order1,order2|2,order3|3,order4,order5
+ * where orderX|Y sets duration Y for that order slot (1/2/3)
+ */
 async function processBulkUpload() {
-    const input = document.getElementById('bulkEmailInput').value.trim();
-    
-    if (!input) {
-        showMessage('Please enter some emails', 'error');
-        return;
-    }
-    
-    const lines = input.split('\n').filter(line => line.trim());
+    const input = document.getElementById('bulkEmailInput');
+    if (!input) { showMessage('Bulk input not found', 'error'); return; }
+    const raw = input.value.trim();
+    if (!raw) { showMessage('Please paste or type emails', 'error'); return; }
+
+    const lines = raw.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
     const accountsToAdd = [];
     const errors = [];
-    
-    lines.forEach((line, index) => {
-        const trimmedLine = line.trim();
-        if (!trimmedLine) return;
-        
-        const parts = trimmedLine.split(',').map(part => part.trim());
-        const email = parts[0];
-        const date = parts[1] || getTodayFormatted();
-        
-        // Extract order numbers from parts 2-6 (up to 5 order numbers)
+
+    lines.forEach((line, idx) => {
+        const parts = line.split(',').map(p => p.trim());
+        const email = parts[0] || '';
+        let date = parts[1] || getTodayFormatted();
+
         const orderNumbers = [];
-        for (let i = 2; i < 7; i++) {
-            orderNumbers.push(parts[i] || '');
-        }
-        
-        // Ensure we have exactly 5 order number slots
-        while (orderNumbers.length < 5) {
-            orderNumbers.push('');
-        }
-        
-        if (!email || !email.includes('@')) {
-            errors.push(`Line ${index + 1}: Invalid email format`);
-            return;
-        }
-        
-        if (date && date !== getTodayFormatted()) {
-            const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
-            if (!dateRegex.test(date)) {
-                errors.push(`Line ${index + 1}: Invalid date format (use YYYY-MM-DD)`);
-                return;
+        const orderDurations = [];
+
+        if (parts.length > 2) {
+            for (let i = 2; i < parts.length && orderNumbers.length < MAX_ORDER_SLOTS; i++) {
+                const piece = parts[i];
+                if (!piece) {
+                    orderNumbers.push('');
+                    orderDurations.push('1');
+                    continue;
+                }
+                // allow order|duration
+                const sub = piece.split('|').map(s => s.trim());
+                const ord = sanitizeOrderNumber(sub[0] || '');
+                const dur = (sub[1] && ['1','2','3'].includes(sub[1])) ? sub[1] : '1';
+                orderNumbers.push(ord);
+                orderDurations.push(dur);
             }
         }
-        
+        while (orderNumbers.length < MAX_ORDER_SLOTS) orderNumbers.push('');
+        while (orderDurations.length < MAX_ORDER_SLOTS) orderDurations.push('1');
+
+        if (!validateEmail(email)) {
+            errors.push(`Line ${idx+1}: invalid email "${email}"`);
+            return;
+        }
+        const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+        if (date && !dateRegex.test(date)) {
+            errors.push(`Line ${idx+1}: invalid date "${date}" (use YYYY-MM-DD)`);
+            return;
+        }
+
         accountsToAdd.push({
-            client: currentBulkClient,
+            client: currentBulkClient || 'Unknown',
             email: email,
-            date: date,
-            orderNumbers: orderNumbers.slice(0, 5)
+            date: date || getTodayFormatted(),
+            orderNumbers: orderNumbers,
+            orderDurations: orderDurations
         });
     });
-    
-    if (errors.length > 0) {
+
+    if (errors.length) {
         showMessage(errors.join('\n'), 'error');
         return;
     }
-    
     if (accountsToAdd.length === 0) {
-        showMessage('No valid emails found', 'error');
+        showMessage('No valid accounts to upload', 'error');
         return;
     }
-    
+
     try {
         showLoading();
         await bulkSaveAccounts(accountsToAdd);
-        
-        // Reload accounts from database to get the actual IDs
         await loadAccounts();
-        
         hideLoading();
         closeBulkUploadModal();
-        showMessage(`Successfully added ${accountsToAdd.length} accounts`);
-    } catch (error) {
+        showMessage(`Uploaded ${accountsToAdd.length} accounts`);
+    } catch (err) {
         hideLoading();
+        console.error('processBulkUpload error', err);
         showMessage('Error uploading accounts', 'error');
-        console.error('Bulk upload error:', error);
     }
 }
 
-function closeBulkUploadModal() {
-    document.getElementById('bulkUploadModal').style.display = 'none';
-    currentBulkClient = null;
+/* ============================================================
+   SECTION: Move Email - Modal + Logic (in-site, suggests existing clients)
+   ============================================================ */
+
+/**
+ * openMoveEmailModal(accountId)
+ * - populates move modal with client list and selects current client by default
+ */
+function openMoveEmailModal(accountId) {
+    const account = accounts.find(a => a.id === accountId);
+    if (!account) { showMessage('Account not found', 'error'); return; }
+    moveEmailTargetAccountId = accountId;
+
+    const modal = document.getElementById('moveEmailModal');
+    const select = document.getElementById('moveClientSelect');
+    if (!modal || !select) { showMessage('Move modal missing', 'error'); return; }
+
+    // clear select
+    select.innerHTML = '';
+
+    // option: keep current client as selected but also allow "Create new client" option
+    // Build options from clients array (unique)
+    const uniqueClients = Array.from(new Set(clients.concat(accounts.map(a=>a.client)))).filter(Boolean);
+    // ensure current client is present
+    if (!uniqueClients.includes(account.client)) uniqueClients.unshift(account.client);
+
+    // add placeholder option
+    const placeholder = document.createElement('option');
+    placeholder.value = '';
+    placeholder.textContent = '-- Select client --';
+    select.appendChild(placeholder);
+
+    // add current client option first
+    uniqueClients.forEach(c => {
+        const opt = document.createElement('option');
+        opt.value = c;
+        opt.textContent = c;
+        if (c === account.client) opt.selected = true;
+        select.appendChild(opt);
+    });
+
+    // add "Create new client" option
+    const createOpt = document.createElement('option');
+    createOpt.value = '__create_new__';
+    createOpt.textContent = '➕ Create new client...';
+    select.appendChild(createOpt);
+
+    // show modal
+    modal.style.display = 'block';
+
+    // when create new selected, show a prompt inline (to keep everything inside site, we'll add an inline input)
+    // We will create an inline input if needed
+    select.onchange = function() {
+        const val = select.value;
+        let existingInline = document.getElementById('moveNewClientInline');
+        if (val === '__create_new__') {
+            if (!existingInline) {
+                const input = document.createElement('input');
+                input.id = 'moveNewClientInline';
+                input.placeholder = 'Enter new client name';
+                input.style.marginTop = '10px';
+                input.style.padding = '6px';
+                input.style.width = '100%';
+                select.parentNode.insertBefore(input, select.nextSibling);
+            }
+        } else {
+            if (existingInline) existingInline.remove();
+        }
+    };
 }
 
-// Client Management Functions
-function showAddClientForm() {
-    document.getElementById('addClientBtn').style.display = 'none';
-    document.getElementById('newClientForm').style.display = 'flex';
-    document.getElementById('newClientName').focus();
-}
+/**
+ * confirmMoveEmailHandler()
+ * - called when user clicks Confirm in move modal
+ */
+async function confirmMoveEmailHandler() {
+    const modal = document.getElementById('moveEmailModal');
+    const select = document.getElementById('moveClientSelect');
+    if (!select || !modal) { showMessage('Move modal missing', 'error'); return; }
+    const val = select.value;
+    let targetClient = val;
 
-function hideAddClientForm() {
-    document.getElementById('addClientBtn').style.display = 'inline-block';
-    document.getElementById('newClientForm').style.display = 'none';
-    document.getElementById('newClientName').value = '';
-}
-
-async function saveNewClient() {
-    const clientName = document.getElementById('newClientName').value.trim();
-    
-    if (!clientName) {
-        showMessage('Please enter a client name', 'error');
+    if (val === '') {
+        showMessage('Please select a client or choose Create new client', 'error');
         return;
     }
-    
-    if (clients.includes(clientName)) {
-        showMessage('Client already exists', 'error');
+    if (val === '__create_new__') {
+        const inline = document.getElementById('moveNewClientInline');
+        if (!inline || !inline.value.trim()) {
+            showMessage('Please enter new client name', 'error');
+            return;
+        }
+        targetClient = inline.value.trim();
+    }
+
+    if (!moveEmailTargetAccountId) {
+        showMessage('No account selected to move', 'error');
         return;
     }
-    
+
+    // proceed to update the account's client
+    const account = accounts.find(a => a.id === moveEmailTargetAccountId);
+    if (!account) { showMessage('Account not found', 'error'); return; }
+
+    const oldClient = account.client;
+    account.client = targetClient;
+
     try {
         showLoading();
-        const placeholderAccount = {
-            client: clientName,
-            email: 'example@email.com',
-            date: getTodayFormatted(),
-            orderNumbers: ['', '', '', '', '']
-        };
-        
-        const id = await saveAccount(placeholderAccount);
-        accounts.push({ id, ...placeholderAccount });
-        clients.push(clientName);
-        
+        await updateAccount(account.id, account);
+        // update local clients list
+        if (!clients.includes(targetClient)) clients.push(targetClient);
+        // remove old client if no accounts left
+        const stillOld = accounts.some(a => a.client === oldClient && a.id !== account.id);
+        if (!stillOld) clients = clients.filter(c => c !== oldClient);
         hideLoading();
-        hideAddClientForm();
-        showMessage(`Client "${clientName}" added successfully`);
+        showMessage(`Moved ${account.email} to ${targetClient}`);
+        // close modal and cleanup
+        closeMoveEmailModal();
         renderAccounts();
-        
-        setTimeout(() => {
-            editAccount(id);
-        }, 100);
-    } catch (error) {
+        renderExpiringAccounts();
+        if (isSearchActive) performSearch();
+    } catch (err) {
         hideLoading();
-        showMessage('Error adding client', 'error');
+        console.error('confirmMoveEmailHandler error', err);
+        showMessage('Error moving email', 'error');
     }
 }
 
-// Modal Functions
+/**
+ * closeMoveEmailModal()
+ */
+function closeMoveEmailModal() {
+    const modal = document.getElementById('moveEmailModal');
+    if (!modal) return;
+    // cleanup inline input if exists
+    const inline = document.getElementById('moveNewClientInline');
+    if (inline) inline.remove();
+    // clear select onchange handler
+    const select = document.getElementById('moveClientSelect');
+    if (select) select.onchange = null;
+    moveEmailTargetAccountId = null;
+    modal.style.display = 'none';
+}
+
+/* ============================================================
+   SECTION: Export Functions (CSV / Excel / JSON)
+   ============================================================ */
+
+function exportToCSV() {
+    const data = isSearchActive ? filteredAccounts : accounts;
+    if (!data || data.length === 0) { showMessage('No accounts to export', 'error'); return; }
+    const headers = ['Client','Email','Expiration','Order1','Dur1','Order2','Dur2','Order3','Dur3','Order4','Dur4','Order5','Dur5'];
+    const rows = data.map(acc => {
+        const cols = [acc.client, acc.email, formatDateForDisplay(acc.date)];
+        for (let i=0;i<MAX_ORDER_SLOTS;i++) {
+            cols.push(acc.orderNumbers && acc.orderNumbers[i] ? acc.orderNumbers[i] : '');
+            cols.push(acc.orderDurations && acc.orderDurations[i] ? acc.orderDurations[i] : '1');
+        }
+        // escape each cell with double quotes and replace inner quotes
+        return cols.map(c => `"${String(c||'').replace(/"/g,'""')}"`).join(',');
+    });
+    const csv = [headers.join(','), ...rows].join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `email-accounts-${new Date().toISOString().split('T')[0]}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    showMessage('CSV exported');
+}
+
+function exportToExcel() {
+    const data = isSearchActive ? filteredAccounts : accounts;
+    if (!data || data.length === 0) { showMessage('No accounts to export', 'error'); return; }
+    const headerCells = ['Client','Email','Expiration'];
+    for (let i=0;i<MAX_ORDER_SLOTS;i++) {
+        headerCells.push(`Order ${i+1}`, `Duration ${i+1}`);
+    }
+
+    const rowsXml = data.map(acc => {
+        const cells = [
+            `<Cell><Data ss:Type="String">${escapeHtml(acc.client)}</Data></Cell>`,
+            `<Cell><Data ss:Type="String">${escapeHtml(acc.email)}</Data></Cell>`,
+            `<Cell><Data ss:Type="String">${escapeHtml(formatDateForDisplay(acc.date))}</Data></Cell>`
+        ];
+        for (let i=0;i<MAX_ORDER_SLOTS;i++) {
+            cells.push(`<Cell><Data ss:Type="String">${escapeHtml(acc.orderNumbers ? acc.orderNumbers[i] || '' : '')}</Data></Cell>`);
+            cells.push(`<Cell><Data ss:Type="String">${escapeHtml(acc.orderDurations ? acc.orderDurations[i] || '1' : '1')}</Data></Cell>`);
+        }
+        return `<Row>${cells.join('')}</Row>`;
+    }).join('\n');
+
+    const xml = `<?xml version="1.0"?>
+    <Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet" xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">
+      <Worksheet ss:Name="Accounts">
+        <Table>
+          <Row>${headerCells.map(h=>`<Cell><Data ss:Type="String">${escapeHtml(h)}</Data></Cell>`).join('')}</Row>
+          ${rowsXml}
+        </Table>
+      </Worksheet>
+    </Workbook>`;
+
+    const blob = new Blob([xml], { type: 'application/vnd.ms-excel' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `email-accounts-${new Date().toISOString().split('T')[0]}.xls`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    showMessage('Excel exported');
+}
+
+function exportToJSON() {
+    const data = isSearchActive ? filteredAccounts : accounts;
+    if (!data || data.length === 0) { showMessage('No accounts to export', 'error'); return; }
+    const payload = data.map(acc => ({
+        client: acc.client,
+        email: acc.email,
+        expirationDate: formatDateForDisplay(acc.date),
+        rawDate: acc.date,
+        orderNumbers: acc.orderNumbers,
+        orderDurations: acc.orderDurations
+    }));
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `email-accounts-${new Date().toISOString().split('T')[0]}.json`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    showMessage('JSON exported');
+}
+
+/* ============================================================
+   SECTION: Search (Unified)
+   ============================================================ */
+
+/**
+ * performSearch()
+ * - uses #unifiedSearchInput and searches email, client, and order numbers
+ */
+function performSearch() {
+    const input = document.getElementById('unifiedSearchInput');
+    if (!input) { showMessage('Search input not found', 'error'); return; }
+    const q = input.value.trim().toLowerCase();
+    if (!q) {
+        clearSearch();
+        return;
+    }
+
+    filteredAccounts = accounts.filter(acc => {
+        const email = (acc.email || '').toLowerCase();
+        const client = (acc.client || '').toLowerCase();
+        const orders = (acc.orderNumbers || []).map(o => (o||'').toLowerCase());
+        return email.includes(q) || client.includes(q) || orders.some(o => o.includes(q));
+    });
+
+    isSearchActive = true;
+    renderSearchResults();
+
+    if (!filteredAccounts || filteredAccounts.length === 0) {
+        showMessage('No accounts found', 'error');
+    }
+}
+
+/**
+ * clearSearch()
+ */
+function clearSearch() {
+    const input = document.getElementById('unifiedSearchInput');
+    if (input) input.value = '';
+    const results = document.getElementById('searchResults');
+    if (results) results.style.display = 'none';
+    isSearchActive = false;
+    filteredAccounts = [];
+}
+
+/* ============================================================
+   SECTION: Small utilities (validation, escaping for onclick)
+   ============================================================ */
+
+function validateEmail(email) {
+    if (!email) return false;
+    const re = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    return re.test(email);
+}
+function validateDate(dateString) {
+    if (!dateString) return true;
+    const re = /^\d{4}-\d{2}-\d{2}$/;
+    if (!re.test(dateString)) return false;
+    const d = new Date(dateString);
+    return d instanceof Date && !isNaN(d);
+}
+function escapeForJs(s) {
+    if (s === null || s === undefined) return '';
+    return String(s).replace(/'/g, "\\'").replace(/"/g, '&quot;');
+}
+
+/* ============================================================
+   SECTION: Order copy button handler (delegation)
+   ============================================================ */
+document.addEventListener('click', function(e) {
+    const el = e.target;
+    if (!el) return;
+    // order copy button may be a button with class order-copy-btn
+    if (el.classList && el.classList.contains('order-copy-btn')) {
+        const v = el.getAttribute('data-copy') || '';
+        if (v) copyToClipboardSafe(v, `Order "${v}" copied`);
+        e.preventDefault();
+        return;
+    }
+});
+
+/* ============================================================
+   SECTION: Confirm modal helper
+   ============================================================ */
+
 function showConfirmModal(message, onConfirm) {
     const modal = document.getElementById('confirmModal');
     const messageEl = document.getElementById('confirmMessage');
-    
+    if (!modal || !messageEl) {
+        // fallback to built-in confirm
+        if (confirm(message)) onConfirm();
+        return;
+    }
     messageEl.textContent = message;
     modal.style.display = 'block';
-    
-    document.getElementById('confirmYes').onclick = () => {
+    document.getElementById('confirmYes').onclick = function() {
         modal.style.display = 'none';
         onConfirm();
     };
-    
-    document.getElementById('confirmNo').onclick = () => {
+    document.getElementById('confirmNo').onclick = function() {
         modal.style.display = 'none';
     };
 }
 
-// Debounce function for auto-search
-function debounce(func, wait) {
-    let timeout;
-    return function executedFunction(...args) {
-        const later = () => {
-            clearTimeout(timeout);
-            func(...args);
-        };
-        clearTimeout(timeout);
-        timeout = setTimeout(later, wait);
-    };
-}
+/* ============================================================
+   SECTION: Event Wiring (DOMContentLoaded)
+   ============================================================ */
 
-// Event Listeners
 document.addEventListener('DOMContentLoaded', function() {
-    loadAccounts();
-    
-    // Add event delegation for order copy buttons
-    document.addEventListener('click', handleOrderCopy);
-    
-    document.getElementById('addClientBtn').addEventListener('click', showAddClientForm);
-    document.getElementById('saveClientBtn').addEventListener('click', saveNewClient);
-    document.getElementById('cancelClientBtn').addEventListener('click', hideAddClientForm);
-    
-    document.getElementById('newClientName').addEventListener('keypress', function(e) {
-        if (e.key === 'Enter') {
-            saveNewClient();
-        }
-    });
-    
-    document.getElementById('searchBtn').addEventListener('click', performSearch);
-    document.getElementById('clearSearchBtn').addEventListener('click', clearSearch);
-    
-    // Order search functionality
-    document.getElementById('orderSearchBtn').addEventListener('click', searchByOrderNumber);
-    document.getElementById('clearOrderSearchBtn').addEventListener('click', clearOrderSearch);
-    
-    document.getElementById('orderSearchInput').addEventListener('keypress', function(e) {
-        if (e.key === 'Enter') {
-            searchByOrderNumber();
-        }
-    });
-    
-    // Auto-search on input
-    ['emailSearchInput', 'dateSearchInput', 'clientSearchInput'].forEach(inputId => {
-        document.getElementById(inputId).addEventListener('input', debounce(performSearch, 300));
-    });
-    
-    document.getElementById('orderSearchInput').addEventListener('input', debounce(searchByOrderNumber, 300));
-    
-    ['emailSearchInput', 'dateSearchInput', 'clientSearchInput'].forEach(inputId => {
-        document.getElementById(inputId).addEventListener('keypress', function(e) {
-            if (e.key === 'Enter') {
-                performSearch();
-            }
+    // initial load
+    if (db) loadAccounts();
+
+    // wire search
+    const unifiedSearchBtn = document.getElementById('unifiedSearchBtn');
+    const unifiedSearchInput = document.getElementById('unifiedSearchInput');
+    const clearUnifiedSearchBtn = document.getElementById('clearUnifiedSearchBtn');
+    if (unifiedSearchBtn) unifiedSearchBtn.addEventListener('click', performSearch);
+    if (clearUnifiedSearchBtn) clearUnifiedSearchBtn.addEventListener('click', clearSearch);
+    if (unifiedSearchInput) {
+        unifiedSearchInput.addEventListener('keypress', function(e) { if (e.key === 'Enter') performSearch(); });
+        // debounce input
+        unifiedSearchInput.addEventListener('input', debounce(performSearch, 300));
+    }
+
+    // export buttons
+    const exportCSVBtn = document.getElementById('exportCSVBtn');
+    const exportExcelBtn = document.getElementById('exportExcelBtn');
+    const exportJSONBtn = document.getElementById('exportJSONBtn');
+    if (exportCSVBtn) exportCSVBtn.addEventListener('click', exportToCSV);
+    if (exportExcelBtn) exportExcelBtn.addEventListener('click', exportToExcel);
+    if (exportJSONBtn) exportJSONBtn.addEventListener('click', exportToJSON);
+
+    // bulk upload buttons
+    const processBulkBtn = document.getElementById('processBulkUpload');
+    const cancelBulkBtn = document.getElementById('cancelBulkUpload');
+    if (processBulkBtn) processBulkBtn.addEventListener('click', processBulkUpload);
+    if (cancelBulkBtn) cancelBulkBtn.addEventListener('click', closeBulkUploadModal);
+
+    // close icons
+    document.querySelectorAll('.close').forEach(c => c.addEventListener('click', function() {
+        const m = this.closest('.modal');
+        if (m) m.style.display = 'none';
+    }));
+
+    // confirm modal click handlers are set when modal opened
+
+    // move email modal confirm/cancel
+    const confirmMoveEmailBtn = document.getElementById('confirmMoveEmail');
+    const cancelMoveEmailBtn = document.getElementById('cancelMoveEmail');
+    if (confirmMoveEmailBtn) confirmMoveEmailBtn.addEventListener('click', confirmMoveEmailHandler);
+    if (cancelMoveEmailBtn) cancelMoveEmailBtn.addEventListener('click', closeMoveEmailModal);
+
+    // click outside modal to close
+    window.addEventListener('click', function(e) {
+        document.querySelectorAll('.modal').forEach(modal => {
+            if (e.target === modal) modal.style.display = 'none';
         });
     });
-    
-    document.getElementById('exportCSVBtn').addEventListener('click', exportToCSV);
-    document.getElementById('exportExcelBtn').addEventListener('click', exportToExcel);
-    document.getElementById('exportJSONBtn').addEventListener('click', exportToJSON);
-    
-    document.getElementById('processBulkUpload').addEventListener('click', processBulkUpload);
-    document.getElementById('cancelBulkUpload').addEventListener('click', closeBulkUploadModal);
-    
-    document.querySelectorAll('.close').forEach(closeBtn => {
-        closeBtn.addEventListener('click', function() {
-            this.closest('.modal').style.display = 'none';
-        });
-    });
-    
-    window.addEventListener('click', function(event) {
-        const modals = document.querySelectorAll('.modal');
-        modals.forEach(modal => {
-            if (event.target === modal) {
-                modal.style.display = 'none';
-            }
-        });
-    });
-    
-    document.addEventListener('keydown', function(e) {
+
+    // keyboard shortcuts
+    window.addEventListener('keydown', function(e) {
         if (e.key === 'Escape') {
-            document.querySelectorAll('.modal').forEach(modal => {
-                modal.style.display = 'none';
-            });
+            document.querySelectorAll('.modal').forEach(m => m.style.display = 'none');
         }
-        
-        if (e.ctrlKey && e.key === 'n') {
-            e.preventDefault();
-            showAddClientForm();
-        }
-        
         if (e.ctrlKey && e.key === 'f') {
             e.preventDefault();
-            document.getElementById('emailSearchInput').focus();
+            const input = document.getElementById('unifiedSearchInput');
+            if (input) input.focus();
         }
-        
         if (e.ctrlKey && e.key === 'e') {
             e.preventDefault();
             exportToCSV();
@@ -1469,8 +1416,67 @@ document.addEventListener('DOMContentLoaded', function() {
     });
 });
 
-// Error Handling
+/* ============================================================
+   SECTION: Debounce utility
+   ============================================================ */
+function debounce(fn, wait) {
+    let t;
+    return function(...args) {
+        clearTimeout(t);
+        t = setTimeout(() => fn.apply(this, args), wait);
+    };
+}
+
+/* ============================================================
+   SECTION: Legacy order search helpers (if your HTML still has orderSearchInput)
+   ============================================================ */
+
+function searchByOrderNumber() {
+    const orderInput = document.getElementById('orderSearchInput');
+    if (!orderInput) return;
+    const q = orderInput.value.trim().toLowerCase();
+    if (!q) {
+        document.getElementById('orderResults') && (document.getElementById('orderResults').style.display = 'none');
+        return;
+    }
+    const matches = accounts.filter(acc => acc.orderNumbers && acc.orderNumbers.some(o => (o||'').toLowerCase().includes(q)));
+    renderOrderSearchResults(matches, q);
+}
+function renderOrderSearchResults(matches, query) {
+    const resultsDiv = document.getElementById('orderResults');
+    if (!resultsDiv) return;
+    if (!matches || matches.length === 0) {
+        resultsDiv.innerHTML = `<div class="no-data">No accounts found with order number containing "${escapeHtml(query)}"</div>`;
+        resultsDiv.style.display = 'block';
+        return;
+    }
+    const html = matches.map(acc => {
+        const matching = acc.orderNumbers.filter(o => (o||'').toLowerCase().includes(query)).join(', ');
+        return `
+            <div class="order-match">
+                <div class="order-match-header">${escapeHtml(acc.client)} - ${escapeHtml(acc.email)}</div>
+                <div class="order-match-details">Matching Orders: <strong>${escapeHtml(matching)}</strong><br>All: ${escapeHtml((acc.orderNumbers||[]).filter(Boolean).join(', '))}<br>Exp: ${formatDateForDisplay(acc.date)}</div>
+            </div>
+        `;
+    }).join('');
+    resultsDiv.innerHTML = `<h4>Found ${matches.length} account${matches.length !== 1 ? 's' : ''}</h4>${html}`;
+    resultsDiv.style.display = 'block';
+}
+function clearOrderSearch() {
+    const orderInput = document.getElementById('orderSearchInput');
+    if (orderInput) orderInput.value = '';
+    const orderResults = document.getElementById('orderResults');
+    if (orderResults) orderResults.style.display = 'none';
+}
+
+/* ============================================================
+   SECTION: Safe global error handler
+   ============================================================ */
 window.addEventListener('error', function(e) {
-    console.error('Global error:', e.error);
+    console.error('Global error:', e.error || e.message || e);
     showMessage('An unexpected error occurred', 'error');
 });
+
+/* ============================================================
+   END OF FILE - script.js
+   ============================================================ */

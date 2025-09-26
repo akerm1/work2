@@ -13,48 +13,23 @@
             <h1>📧 Email Account Organizer</h1>
         </header>
 
-        <!-- Search Section -->
+        <!-- 🔍 Unified Search Section -->
         <div class="search-section">
             <h3>Search Accounts</h3>
             <div class="search-controls">
                 <div class="search-inputs">
-                    <input type="text" id="emailSearchInput" placeholder="Search by email..." />
-                    <input type="date" id="dateSearchInput" placeholder="Search by date" />
-                    <input type="text" id="clientSearchInput" placeholder="Search by client..." />
+                    <input type="text" id="unifiedSearchInput" placeholder="Search by email, client, or order number..." />
                 </div>
                 <div class="search-buttons">
-                    <button id="searchBtn" class="btn btn-primary">Search</button>
-                    <button id="clearSearchBtn" class="btn btn-secondary">Clear</button>
+                    <button id="unifiedSearchBtn" class="btn btn-primary">Search</button>
+                    <button id="clearUnifiedSearchBtn" class="btn btn-secondary">Clear</button>
                 </div>
             </div>
         </div>
 
-        <!-- Order Number Search Section -->
-        <div class="order-search-section">
-            <h3>Search by Order Number</h3>
-            <div class="search-controls">
-                <div class="search-inputs">
-                    <input type="text" id="orderSearchInput" placeholder="Search by order number..." />
-                </div>
-                <div class="search-buttons">
-                    <button id="orderSearchBtn" class="btn btn-primary">Search Orders</button>
-                    <button id="clearOrderSearchBtn" class="btn btn-secondary">Clear</button>
-                </div>
-            </div>
-            <div id="orderResults" class="order-results"></div>
-        </div>
+        <!-- 📤 Export Section (moved below expiring accounts) will be placed later -->
 
-        <!-- Export Section -->
-        <div class="export-section">
-            <h3>Export Data</h3>
-            <div class="export-buttons">
-                <button id="exportCSVBtn" class="btn btn-success">Export CSV</button>
-                <button id="exportExcelBtn" class="btn btn-success">Export Excel</button>
-                <button id="exportJSONBtn" class="btn btn-success">Export JSON</button>
-            </div>
-        </div>
-
-        <!-- Search Results -->
+        <!-- 🔎 Search Results -->
         <div id="searchResults" class="search-results" style="display: none;">
             <h3>Search Results <span id="resultCount"></span></h3>
             <div class="table-container">
@@ -73,7 +48,7 @@
             </div>
         </div>
 
-        <!-- Expiring Accounts -->
+        <!-- ⏰ Expiring Accounts -->
         <section class="expiring-section">
             <h2>⚠️ Accounts Expiring Tomorrow</h2>
             <div class="table-container">
@@ -95,12 +70,22 @@
             </div>
         </section>
 
-        <!-- Accounts Section -->
+        <!-- 📤 Export Section (moved below expiring accounts) -->
+        <div class="export-section">
+            <h3>Export Data</h3>
+            <div class="export-buttons">
+                <button id="exportCSVBtn" class="btn btn-success">Export CSV</button>
+                <button id="exportExcelBtn" class="btn btn-success">Export Excel</button>
+                <button id="exportJSONBtn" class="btn btn-success">Export JSON</button>
+            </div>
+        </div>
+
+        <!-- 👥 Accounts Section -->
         <section class="accounts-section">
             <h2>📋 All Accounts by Client</h2>
             <div id="clientsContainer"></div>
             
-            <!-- Add Client -->
+            <!-- ➕ Add Client -->
             <div class="add-client-section">
                 <button id="addClientBtn" class="btn btn-primary">+ Add New Client</button>
                 <div id="newClientForm" class="new-client-form" style="display: none;">
@@ -112,7 +97,7 @@
         </section>
     </div>
 
-    <!-- Bulk Upload Modal -->
+    <!-- 📦 Bulk Upload Modal -->
     <div id="bulkUploadModal" class="modal">
         <div class="modal-content">
             <div class="modal-header">
@@ -121,8 +106,8 @@
             </div>
             <div class="modal-body">
                 <p>Paste emails (one per line). Format:</p>
-                <pre><code>email@example.com</code> or <code>email@example.com,2025-12-31</code> or <code>email@example.com,2025-12-31,order1,order2,order3</code></pre>
-                <textarea id="bulkEmailInput" placeholder="email1@example.com&#10;email2@example.com,2025-01-15,order123,order456&#10;email3@example.com,,,order789"></textarea>
+                <pre><code>email@example.com</code> or <code>email@example.com,2025-12-31,order1</code></pre>
+                <textarea id="bulkEmailInput" placeholder="email1@example.com&#10;email2@example.com,2025-01-15,order123"></textarea>
                 <div class="modal-actions">
                     <button id="processBulkUpload" class="btn btn-primary">Upload Emails</button>
                     <button id="cancelBulkUpload" class="btn btn-secondary">Cancel</button>
@@ -131,7 +116,7 @@
         </div>
     </div>
 
-    <!-- Confirmation Modal -->
+    <!-- 🔄 Confirm Modal -->
     <div id="confirmModal" class="modal">
         <div class="modal-content">
             <div class="modal-body">
@@ -144,13 +129,31 @@
         </div>
     </div>
 
-    <!-- Loading Spinner -->
+    <!-- ✉️ Move Email Modal -->
+    <div id="moveEmailModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Move Email</h3>
+                <span class="close">&times;</span>
+            </div>
+            <div class="modal-body">
+                <p>Select a client to move this email to:</p>
+                <select id="moveClientSelect"></select>
+                <div class="modal-actions">
+                    <button id="confirmMoveEmail" class="btn btn-primary">Move</button>
+                    <button id="cancelMoveEmail" class="btn btn-secondary">Cancel</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ⏳ Loading Spinner -->
     <div id="loadingSpinner" class="loading-spinner">
         <div class="spinner"></div>
         <p>Loading...</p>
     </div>
 
-    <!-- Firebase SDKs (official Google CDN) -->
+    <!-- Firebase SDKs -->
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
 
