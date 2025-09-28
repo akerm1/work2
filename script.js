@@ -1,34 +1,16 @@
 /**************************************************************
- * script.js
+ * script.js - MODIFIED VERSION
  *
- * Email Account Organizer - FULL script
- * - Uses Firestore (compat) for storage
- * - Unified search (email/client/order)
- * - Order durations (1/2/3 months)
- * - Move Email modal (in-site, suggests existing clients)
- * - Bulk upload modal
- * - Export (CSV / Excel / JSON)
- * - Edit / Add / Delete accounts
- * - Plenty of section headers and inline comments for clarity
- *
- * IMPORTANT:
- * - Replace the firebaseConfig below with your project's keys if needed.
- * - This code expects the following HTML IDs (from HTML you accepted):
- *   #unifiedSearchInput, #unifiedSearchBtn, #clearUnifiedSearchBtn,
- *   #clientsContainer, #expiringTableBody, #noExpiringAccounts,
- *   #exportCSVBtn, #exportExcelBtn, #exportJSONBtn,
- *   #bulkUploadModal, #bulkEmailInput, #processBulkUpload, #cancelBulkUpload,
- *   #confirmModal, #confirmMessage, #confirmYes, #confirmNo,
- *   #moveEmailModal, #moveClientSelect, #confirmMoveEmail, #cancelMoveEmail,
- *   #loadingSpinner, #searchResults, #searchResultsBody, #resultCount
+ * Changes implemented:
+ * 1. Improved edit UI for order inputs (larger, vertical layout)
+ * 2. Auto-decrement order durations monthly
+ * 3. Fixed bulk search for comma-separated emails
+ * 4. Sort accounts with missing orders to top
  *
  ****************************************************************/
-
 /* ============================================================
    SECTION: Firebase Configuration & Initialization
    ============================================================ */
-
-// NOTE: keep your real API keys here; the example below uses placeholder values
 const firebaseConfig = {
     apiKey: "AIzaSyDznYcUtQWRD7QqYBDr1QupUMfVqZnfGEE",
     authDomain: "my-work-82778.firebaseapp.com",
@@ -37,72 +19,51 @@ const firebaseConfig = {
     messagingSenderId: "1070444118182",
     appId: "1:1070444118182:web:bae373255bd124d3a2b467"
 };
-
 let db = null;
 try {
-    // initialize firebase compat
     firebase.initializeApp(firebaseConfig);
     db = firebase.firestore();
     console.log('✅ Firebase initialized');
 } catch (err) {
     console.error('❌ Firebase init error:', err);
-    // show friendly error on page
     showError('Failed to connect to Firebase. Check your configuration in script.js.');
 }
 
 /* ============================================================
    SECTION: Global State
    ============================================================ */
-
-const MAX_ORDER_SLOTS = 5; // keep 5 order slots like your original design
-
-let accounts = [];           // all accounts loaded from Firestore
-let clients = [];            // unique client names
-let filteredAccounts = [];   // results when searching
-let isSearchActive = false;  // whether search results are shown
-let expandedClients = new Set(); // which clients are expanded in UI
-
-let currentBulkClient = null;   // client for bulk upload modal
-let moveEmailTargetAccountId = null; // account id currently being moved (for modal)
+const MAX_ORDER_SLOTS = 5;
+let accounts = [];
+let clients = [];
+let filteredAccounts = [];
+let isSearchActive = false;
+let expandedClients = new Set();
+let currentBulkClient = null;
+let moveEmailTargetAccountId = null;
 
 /* ============================================================
-   SECTION: Utility Helpers (dates, sanitize, escape)
+   SECTION: Utility Helpers
    ============================================================ */
-
-/**
- * formatDateForDisplay()
- * - shows dd/mm/yyyy (safe and stable)
- */
 function formatDateForDisplay(dateString) {
     if (!dateString) return '';
     const parts = String(dateString).split('-');
     if (parts.length === 3) {
-        // assume yyyy-mm-dd
-        return `${parts[2].padStart(2,'0')}/${parts[1].padStart(2,'0')}/${parts[0]}`;
+        return `${parts[2].padStart(2,'0')}/${parts[1].padStart(2,'0')}`;
     }
-    // fallback to Date parsing
     const d = new Date(dateString);
     if (d instanceof Date && !isNaN(d)) {
         const day = String(d.getDate()).padStart(2, '0');
         const month = String(d.getMonth()+1).padStart(2, '0');
-        const year = d.getFullYear();
-        return `${day}/${month}/${year}`;
+        return `${day}/${month}`;
     }
     return dateString;
 }
 
-/**
- * formatDateForStorage()
- * - ensures YYYY-MM-DD or today
- */
 function formatDateForStorage(dateString) {
     if (!dateString) return getTodayFormatted();
     return dateString;
 }
 
-/**
- * getTodayFormatted() / getTomorrowFormatted()
- */
 function getTodayFormatted() {
     const t = new Date();
     const y = t.getFullYear();
@@ -110,6 +71,7 @@ function getTodayFormatted() {
     const d = String(t.getDate()).padStart(2,'0');
     return `${y}-${m}-${d}`;
 }
+
 function getTomorrowFormatted() {
     const t = new Date();
     t.setDate(t.getDate() + 1);
@@ -119,48 +81,33 @@ function getTomorrowFormatted() {
     return `${y}-${m}-${d}`;
 }
 
-/**
- * escapeHtml()
- * - simple html escape to prevent injection in rendered strings
- */
 function escapeHtml(text) {
     if (text === null || text === undefined) return '';
     return String(text)
         .replace(/&/g,'&amp;')
-        .replace(/</g,'&lt;')
-        .replace(/>/g,'&gt;')
+        .replace(/</g,'<')
+        .replace(/>/g,'>')
         .replace(/"/g,'&quot;')
         .replace(/'/g,'&#039;');
 }
 
-/**
- * sanitizeOrderNumber()
- * - keep only useful characters
- */
 function sanitizeOrderNumber(order) {
     return String(order || '').replace(/[^a-zA-Z0-9\s\-_@.]/g, '').trim().substring(0, 100);
 }
 
 /* ============================================================
-   SECTION: UI Helpers - Notifications & Loading
+   SECTION: UI Helpers
    ============================================================ */
-
-/* NOTE: This showMessage function restores the original style you had:
-   - creates a `.message` element with class "success" or "error"
-   - disappears after 4 seconds
-*/
 function showMessage(message, type = 'success') {
     const messageEl = document.createElement('div');
     messageEl.className = `message ${type}`;
     messageEl.textContent = message;
     document.body.appendChild(messageEl);
-
     setTimeout(() => {
         try { messageEl.remove(); } catch (e) {}
     }, 4000);
 }
 
-/* showError creates a visible fixed error box at top (used for critical failures) */
 function showError(message) {
     let errorBox = document.getElementById('errorBox');
     if (!errorBox) {
@@ -180,17 +127,16 @@ function showError(message) {
     errorBox.textContent = message;
 }
 
-/* Loading spinner show/hide (assumes #loadingSpinner exists) */
 function showLoading() {
     const el = document.getElementById('loadingSpinner');
     if (el) el.style.display = 'flex';
 }
+
 function hideLoading() {
     const el = document.getElementById('loadingSpinner');
     if (el) el.style.display = 'none';
 }
 
-/* Copy to clipboard safe method (clipboard API + fallback) */
 function copyToClipboardSafe(text, successMessage='Copied to clipboard') {
     if (!text) {
         showMessage('Nothing to copy', 'error');
@@ -202,6 +148,7 @@ function copyToClipboardSafe(text, successMessage='Copied to clipboard') {
         fallbackCopy(text, successMessage);
     }
 }
+
 function fallbackCopy(text, successMessage) {
     try {
         const ta = document.createElement('textarea');
@@ -220,21 +167,30 @@ function fallbackCopy(text, successMessage) {
 }
 
 /* ============================================================
-   SECTION: Order rendering (numbers + durations)
+   SECTION: Order rendering
    ============================================================ */
-
-/**
- * renderOrderNumbers(orderNumbers, orderDurations)
- * - returns an HTML snippet showing orders with duration labels and copy buttons
- */
 function renderOrderNumbers(orderNumbers, orderDurations) {
     orderNumbers = Array.isArray(orderNumbers) ? orderNumbers.slice(0, MAX_ORDER_SLOTS) : Array(MAX_ORDER_SLOTS).fill('');
     orderDurations = Array.isArray(orderDurations) ? orderDurations.slice(0, MAX_ORDER_SLOTS) : Array(MAX_ORDER_SLOTS).fill('1');
-
-    // ensure length
     while (orderNumbers.length < MAX_ORDER_SLOTS) orderNumbers.push('');
     while (orderDurations.length < MAX_ORDER_SLOTS) orderDurations.push('1');
-
+    
+    // Auto-decrement durations based on expiration date
+    const accountDate = arguments[2]; // Pass expiration date as third argument
+    if (accountDate) {
+        const today = new Date();
+        const expDate = new Date(accountDate);
+        const monthsDiff = (expDate.getFullYear() - today.getFullYear()) * 12 + (expDate.getMonth() - today.getMonth());
+        
+        // Only decrement if expiration is in the past or current month
+        if (monthsDiff <= 0) {
+            orderDurations = orderDurations.map(dur => {
+                const numDur = parseInt(dur) || 1;
+                return Math.max(1, numDur - Math.abs(monthsDiff)).toString();
+            });
+        }
+    }
+    
     const parts = orderNumbers.map((order, i) => {
         if (order && String(order).trim()) {
             return `<div class="order-number"><span class="order-text">${escapeHtml(order)}</span> <span class="order-duration">(${escapeHtml(orderDurations[i])}M)</span> <button class="order-copy-btn" data-copy="${escapeHtml(order)}" title="Copy order">📋</button></div>`;
@@ -242,25 +198,18 @@ function renderOrderNumbers(orderNumbers, orderDurations) {
             return `<div class="order-number empty"><span class="order-text">Order ${i+1}</span></div>`;
         }
     });
-
     return `<div class="order-numbers">${parts.join('')}</div>`;
 }
 
-/**
- * renderOrderInputs(orderNumbers, orderDurations, accountId)
- * - renders input fields plus a select for duration (1/2/3)
- */
 function renderOrderInputs(orderNumbers, orderDurations, accountId) {
     orderNumbers = Array.isArray(orderNumbers) ? orderNumbers.slice(0,MAX_ORDER_SLOTS) : Array(MAX_ORDER_SLOTS).fill('');
     orderDurations = Array.isArray(orderDurations) ? orderDurations.slice(0,MAX_ORDER_SLOTS) : Array(MAX_ORDER_SLOTS).fill('1');
-
     while (orderNumbers.length < MAX_ORDER_SLOTS) orderNumbers.push('');
     while (orderDurations.length < MAX_ORDER_SLOTS) orderDurations.push('1');
-
     const parts = orderNumbers.map((order, i) => {
         const dur = orderDurations[i] || '1';
         return `
-            <div class="order-with-duration" style="display:flex;gap:6px;align-items:center;margin-bottom:6px;">
+            <div class="order-with-duration">
                 <input type="text" class="order-input" value="${escapeHtml(order)}" placeholder="Order ${i+1}" data-account="${escapeHtml(accountId)}" data-index="${i}" maxlength="100">
                 <select class="order-duration" data-account="${escapeHtml(accountId)}" data-index="${i}">
                     <option value="1" ${dur==='1'?'selected':''}>1M</option>
@@ -270,19 +219,12 @@ function renderOrderInputs(orderNumbers, orderDurations, accountId) {
             </div>
         `;
     });
-
     return `<div class="order-inputs">${parts.join('')}</div>`;
 }
 
 /* ============================================================
    SECTION: Firestore CRUD Helpers
    ============================================================ */
-
-/**
- * loadAccounts()
- * - loads all accounts from firestore into 'accounts' array
- * - normalizes missing orderDurations for backwards compatibility
- */
 async function loadAccounts() {
     if (!db) {
         showError('Firestore not initialized.');
@@ -296,10 +238,8 @@ async function loadAccounts() {
             const data = doc.data() || {};
             const orderNumbers = Array.isArray(data.orderNumbers) ? data.orderNumbers.slice(0, MAX_ORDER_SLOTS) : Array(MAX_ORDER_SLOTS).fill('');
             const orderDurations = Array.isArray(data.orderDurations) ? data.orderDurations.slice(0, MAX_ORDER_SLOTS) : Array(MAX_ORDER_SLOTS).fill('1');
-
             while (orderNumbers.length < MAX_ORDER_SLOTS) orderNumbers.push('');
             while (orderDurations.length < MAX_ORDER_SLOTS) orderDurations.push('1');
-
             const account = {
                 id: doc.id,
                 client: data.client || 'Unknown',
@@ -310,7 +250,6 @@ async function loadAccounts() {
             };
             accounts.push(account);
         });
-
         clients = [...new Set(accounts.map(a => a.client))].filter(Boolean);
         renderAccounts();
         renderExpiringAccounts();
@@ -323,11 +262,6 @@ async function loadAccounts() {
     }
 }
 
-/**
- * saveAccount(accountData)
- * - adds a new document
- * - returns doc id
- */
 async function saveAccount(accountData) {
     if (!db) throw new Error('Firestore not available');
     try {
@@ -345,10 +279,6 @@ async function saveAccount(accountData) {
     }
 }
 
-/**
- * updateAccount(id, accountData)
- * - updates the document with given id
- */
 async function updateAccount(id, accountData) {
     if (!db) throw new Error('Firestore not available');
     try {
@@ -365,9 +295,6 @@ async function updateAccount(id, accountData) {
     }
 }
 
-/**
- * deleteAccount(id)
- */
 async function deleteAccount(id) {
     if (!db) throw new Error('Firestore not available');
     try {
@@ -378,10 +305,6 @@ async function deleteAccount(id) {
     }
 }
 
-/**
- * bulkSaveAccounts(accountsData)
- * - writes multiple docs in a batch
- */
 async function bulkSaveAccounts(accountsData) {
     if (!db) throw new Error('Firestore not available');
     try {
@@ -404,31 +327,37 @@ async function bulkSaveAccounts(accountsData) {
 }
 
 /* ============================================================
-   SECTION: Rendering - Accounts, Clients, Expiring & Search
+   SECTION: Rendering Functions
    ============================================================ */
-
-/**
- * renderAccounts()
- * - builds the clients container with tables grouped by client
- */
 function renderAccounts() {
     const container = document.getElementById('clientsContainer');
     if (!container) return;
     container.innerHTML = '';
-
-    // group accounts by client
+    
+    // Group accounts by client
     const groups = {};
     accounts.forEach(acc => {
         if (!groups[acc.client]) groups[acc.client] = [];
         groups[acc.client].push(acc);
     });
-
+    
+    // Sort accounts within each client: missing orders first
+    Object.keys(groups).forEach(client => {
+        groups[client].sort((a, b) => {
+            const aHasOrders = a.orderNumbers.some(o => o.trim());
+            const bHasOrders = b.orderNumbers.some(o => o.trim());
+            if (!aHasOrders && bHasOrders) return -1;
+            if (aHasOrders && !bHasOrders) return 1;
+            return 0;
+        });
+    });
+    
     const clientNames = Object.keys(groups).sort((a,b) => a.localeCompare(b));
     if (clientNames.length === 0) {
         container.innerHTML = '<div class="no-data">No accounts found. Add your first client!</div>';
         return;
     }
-
+    
     clientNames.forEach(clientName => {
         const clientAccounts = groups[clientName];
         const section = document.createElement('section');
@@ -436,8 +365,8 @@ function renderAccounts() {
         const isExpanded = expandedClients.has(clientName);
         const displayAccounts = isExpanded ? clientAccounts : clientAccounts.slice(0, 5);
         const showToggle = clientAccounts.length > 5;
-
-        // header
+        
+        // Header
         const header = document.createElement('div');
         header.className = 'client-header';
         header.innerHTML = `
@@ -448,8 +377,8 @@ function renderAccounts() {
                 <button class="btn" onclick="copyToClipboardSafe('${clientAccounts.map(a => a.email).join(', ')}','Copied all emails')">Copy All Emails</button>
             </div>
         `;
-
-        // table
+        
+        // Table
         const table = document.createElement('div');
         table.className = 'table-container';
         const innerTable = document.createElement('table');
@@ -466,11 +395,10 @@ function renderAccounts() {
             </tbody>
         `;
         table.appendChild(innerTable);
-
         section.appendChild(header);
         section.appendChild(table);
-
-        // append rows
+        
+        // Append rows
         const tbody = innerTable.querySelector('tbody');
         displayAccounts.forEach(account => {
             const tr = document.createElement('tr');
@@ -479,7 +407,7 @@ function renderAccounts() {
             tr.innerHTML = `
                 <td class="email-cell">${escapeHtml(account.email)}</td>
                 <td class="date-cell">${formatDateForDisplay(account.date)}</td>
-                <td class="orders-cell">${renderOrderNumbers(account.orderNumbers, account.orderDurations)}</td>
+                <td class="orders-cell">${renderOrderNumbers(account.orderNumbers, account.orderDurations, account.date)}</td>
                 <td class="actions-cell">
                     <div class="action-buttons">
                         <button class="btn" onclick="editAccount('${escapeForJs(account.id)}')">Edit</button>
@@ -491,39 +419,30 @@ function renderAccounts() {
             `;
             tbody.appendChild(tr);
         });
-
-        // show toggle
+        
+        // Show toggle
         if (showToggle) {
             const toggleDiv = document.createElement('div');
             toggleDiv.className = 'toggle-container';
             toggleDiv.innerHTML = `<button class="btn" onclick="toggleClientAccounts('${escapeForJs(clientName)}')">${isExpanded ? 'Show Less' : 'Show More'}</button>`;
             section.appendChild(toggleDiv);
         }
-
         container.appendChild(section);
     });
 }
 
-/**
- * toggleClientAccounts(clientName)
- */
 function toggleClientAccounts(clientName) {
     if (expandedClients.has(clientName)) expandedClients.delete(clientName);
     else expandedClients.add(clientName);
     renderAccounts();
 }
 
-/**
- * renderExpiringAccounts()
- * - shows accounts whose date is tomorrow
- */
 function renderExpiringAccounts() {
     const tomorrow = getTomorrowFormatted();
     const expiring = accounts.filter(acc => acc.date === tomorrow);
     const tbody = document.getElementById('expiringTableBody');
     const noDiv = document.getElementById('noExpiringAccounts');
     if (!tbody) return;
-
     if (expiring.length === 0) {
         tbody.innerHTML = '';
         if (noDiv) noDiv.style.display = 'block';
@@ -534,7 +453,7 @@ function renderExpiringAccounts() {
                 <td>${escapeHtml(acc.client)}</td>
                 <td>${escapeHtml(acc.email)}</td>
                 <td>${formatDateForDisplay(acc.date)}</td>
-                <td>${renderOrderNumbers(acc.orderNumbers, acc.orderDurations)}</td>
+                <td>${renderOrderNumbers(acc.orderNumbers, acc.orderDurations, acc.date)}</td>
                 <td>
                     <div class="action-buttons">
                         <button class="btn" onclick="editAccount('${escapeForJs(acc.id)}')">Edit</button>
@@ -548,30 +467,36 @@ function renderExpiringAccounts() {
     }
 }
 
-/**
- * renderSearchResults()
- * - shows filteredAccounts grouped by client
- */
 function renderSearchResults() {
     const container = document.getElementById('searchResults');
     const body = document.getElementById('searchResultsBody');
     const countEl = document.getElementById('resultCount');
     if (!container || !body || !countEl) return;
-
     if (!filteredAccounts || filteredAccounts.length === 0) {
         body.innerHTML = '<tr><td colspan="5" class="no-data">No accounts found matching your search.</td></tr>';
         countEl.textContent = '0 results';
         container.style.display = 'block';
         return;
     }
-
-    // group filtered by client
+    
+    // Group filtered by client
     const groups = {};
     filteredAccounts.forEach(acc => {
         if (!groups[acc.client]) groups[acc.client] = [];
         groups[acc.client].push(acc);
     });
-
+    
+    // Sort accounts within each client: missing orders first
+    Object.keys(groups).forEach(client => {
+        groups[client].sort((a, b) => {
+            const aHasOrders = a.orderNumbers.some(o => o.trim());
+            const bHasOrders = b.orderNumbers.some(o => o.trim());
+            if (!aHasOrders && bHasOrders) return -1;
+            if (aHasOrders && !bHasOrders) return 1;
+            return 0;
+        });
+    });
+    
     const htmlParts = [];
     Object.keys(groups).sort().forEach(client => {
         htmlParts.push(`
@@ -586,7 +511,7 @@ function renderSearchResults() {
                     <td>${escapeHtml(account.client)}</td>
                     <td>${escapeHtml(account.email)}</td>
                     <td>${formatDateForDisplay(account.date)}</td>
-                    <td>${renderOrderNumbers(account.orderNumbers, account.orderDurations)}</td>
+                    <td>${renderOrderNumbers(account.orderNumbers, account.orderDurations, account.date)}</td>
                     <td>
                         <div class="action-buttons">
                             <button class="btn" onclick="editAccount('${escapeForJs(account.id)}')">Edit</button>
@@ -599,26 +524,18 @@ function renderSearchResults() {
             `);
         });
     });
-
     body.innerHTML = htmlParts.join('');
     countEl.textContent = `${filteredAccounts.length} result${filteredAccounts.length !== 1 ? 's' : ''} found`;
     container.style.display = 'block';
 }
 
 /* ============================================================
-   SECTION: Account Add / Edit / Save / Cancel / Delete
+   SECTION: Account Management
    ============================================================ */
-
-/**
- * addNewAccount(clientName)
- * - inserts a new editable row for adding an account under the client
- */
 function addNewAccount(clientName) {
     const tbodyId = `client-${escapeHtml(clientName).replace(/\s+/g,'-')}`;
     const tbody = document.getElementById(tbodyId);
-    // If tbody not present (client group not visible), just call renderAccounts then open edit for newly created placeholder
     if (!tbody) {
-        // create placeholder account then edit
         (async () => {
             try {
                 showLoading();
@@ -643,8 +560,7 @@ function addNewAccount(clientName) {
         })();
         return;
     }
-
-    // create a new row in the client tbody for immediate input
+    
     const newRow = document.createElement('tr');
     newRow.className = 'editing-row';
     newRow.innerHTML = `
@@ -663,9 +579,6 @@ function addNewAccount(clientName) {
     if (input) { input.focus(); input.select(); }
 }
 
-/**
- * saveNewAccount(clientName, button)
- */
 async function saveNewAccount(clientName, button) {
     const row = button.closest('tr');
     if (!row) return;
@@ -673,19 +586,15 @@ async function saveNewAccount(clientName, button) {
     const dateEl = row.querySelector('.new-date');
     const orderInputs = row.querySelectorAll('.order-input');
     const durationSelects = row.querySelectorAll('.order-duration');
-
     const email = emailEl ? emailEl.value.trim() : '';
     const date = dateEl ? dateEl.value : getTodayFormatted();
-
     if (!email) { showMessage('Please enter an email', 'error'); return; }
     if (!validateEmail(email)) { showMessage('Invalid email', 'error'); return; }
     if (!validateDate(date)) { showMessage('Invalid date', 'error'); return; }
-
     const orderNumbers = Array.from(orderInputs).map(inp => sanitizeOrderNumber(inp.value));
     while (orderNumbers.length < MAX_ORDER_SLOTS) orderNumbers.push('');
     const orderDurations = Array.from(durationSelects).map(sel => sel.value || '1');
     while (orderDurations.length < MAX_ORDER_SLOTS) orderDurations.push('1');
-
     const accountData = {
         client: clientName,
         email: email,
@@ -693,7 +602,6 @@ async function saveNewAccount(clientName, button) {
         orderNumbers: orderNumbers,
         orderDurations: orderDurations
     };
-
     try {
         showLoading();
         const id = await saveAccount(accountData);
@@ -711,30 +619,21 @@ async function saveNewAccount(clientName, button) {
     }
 }
 
-/**
- * cancelNewAccount(button)
- */
 function cancelNewAccount(button) {
     const row = button.closest('tr');
     if (row) row.remove();
 }
 
-/**
- * editAccount(id)
- * - converts an existing row to editable form
- */
 function editAccount(id) {
     const account = accounts.find(a => a.id === id);
     if (!account) {
         showMessage('Account not found', 'error');
         return;
     }
-
-    // find the row in search results or main view
+    
     let row = document.querySelector(`#searchResultsBody tr.account-row[data-id="${id}"]`);
     if (!row) row = document.querySelector(`tr.account-row[data-id="${id}"]`);
     if (!row) {
-        // fallback: re-render and then find again
         renderAccounts();
         row = document.querySelector(`tr.account-row[data-id="${id}"]`);
         if (!row) {
@@ -742,24 +641,21 @@ function editAccount(id) {
             return;
         }
     }
-
-    // save original in data attributes for cancel
+    
     row.dataset.originalEmail = row.querySelector('.email-cell') ? row.querySelector('.email-cell').innerText : (account.email || '');
     row.dataset.originalDate = row.querySelector('.date-cell') ? row.querySelector('.date-cell').innerText : formatDateForDisplay(account.date);
-    row.dataset.originalOrders = row.querySelector('.orders-cell') ? row.querySelector('.orders-cell').innerHTML : renderOrderNumbers(account.orderNumbers, account.orderDurations);
+    row.dataset.originalOrders = row.querySelector('.orders-cell') ? row.querySelector('.orders-cell').innerHTML : renderOrderNumbers(account.orderNumbers, account.orderDurations, account.date);
     row.dataset.originalActions = row.querySelector('.actions-cell') ? row.querySelector('.actions-cell').innerHTML : '';
-
-    // build edit UI
+    
     const emailCell = row.querySelector('.email-cell') || row.children[0];
     const dateCell = row.querySelector('.date-cell') || row.children[1];
     const ordersCell = row.querySelector('.orders-cell') || row.children[2];
     const actionsCell = row.querySelector('.actions-cell') || row.children[3];
-
     if (!emailCell || !dateCell || !ordersCell || !actionsCell) {
         showMessage('Edit failed: table structure unexpected', 'error');
         return;
     }
-
+    
     emailCell.innerHTML = `<input type="email" class="edit-email" value="${escapeHtml(account.email)}">`;
     dateCell.innerHTML = `<input type="date" class="edit-date" value="${account.date || getTodayFormatted()}">`;
     ordersCell.innerHTML = renderOrderInputs(account.orderNumbers, account.orderDurations, account.id);
@@ -769,11 +665,7 @@ function editAccount(id) {
     if (e) { e.focus(); e.select(); }
 }
 
-/**
- * saveAccountEdit(id)
- */
 async function saveAccountEdit(id) {
-    // find the row
     let row = document.querySelector(`#searchResultsBody tr.account-row[data-id="${id}"]`);
     if (!row) row = document.querySelector(`tr.account-row[data-id="${id}"]`);
     if (!row) {
@@ -784,22 +676,17 @@ async function saveAccountEdit(id) {
     const dateEl = row.querySelector('.edit-date');
     const orderInputs = row.querySelectorAll('.order-input');
     const durationSelects = row.querySelectorAll('.order-duration');
-
     if (!emailEl || !dateEl) { showMessage('Edit fields missing', 'error'); return; }
     const email = emailEl.value.trim();
     const date = dateEl.value;
-
     if (!validateEmail(email)) { showMessage('Invalid email', 'error'); return; }
     if (!validateDate(date)) { showMessage('Invalid date', 'error'); return; }
-
     const orderNumbers = Array.from(orderInputs).map(i => sanitizeOrderNumber(i.value));
     while (orderNumbers.length < MAX_ORDER_SLOTS) orderNumbers.push('');
     const orderDurations = Array.from(durationSelects).map(s => s.value || '1');
     while (orderDurations.length < MAX_ORDER_SLOTS) orderDurations.push('1');
-
     const account = accounts.find(a => a.id === id);
     if (!account) { showMessage('Account not found in memory', 'error'); return; }
-
     const updated = {
         client: account.client,
         email: email,
@@ -807,11 +694,9 @@ async function saveAccountEdit(id) {
         orderNumbers: orderNumbers,
         orderDurations: orderDurations
     };
-
     try {
         showLoading();
         await updateAccount(id, updated);
-        // update local model
         Object.assign(account, updated);
         hideLoading();
         showMessage('Account updated');
@@ -824,18 +709,13 @@ async function saveAccountEdit(id) {
     }
 }
 
-/**
- * cancelAccountEdit(id)
- */
 function cancelAccountEdit(id) {
-    // try to find row
     let row = document.querySelector(`#searchResultsBody tr.account-row[data-id="${id}"]`);
     if (!row) row = document.querySelector(`tr.account-row[data-id="${id}"]`);
     if (!row) {
         if (isSearchActive) renderSearchResults(); else renderAccounts();
         return;
     }
-
     const account = accounts.find(a => a.id === id);
     if (account) {
         const emailCell = row.querySelector('.email-cell') || row.children[0];
@@ -844,7 +724,7 @@ function cancelAccountEdit(id) {
         const actionsCell = row.querySelector('.actions-cell') || row.children[3];
         if (emailCell) emailCell.innerHTML = escapeHtml(account.email);
         if (dateCell) dateCell.innerHTML = formatDateForDisplay(account.date);
-        if (ordersCell) ordersCell.innerHTML = renderOrderNumbers(account.orderNumbers, account.orderDurations);
+        if (ordersCell) ordersCell.innerHTML = renderOrderNumbers(account.orderNumbers, account.orderDurations, account.date);
         if (actionsCell) actionsCell.innerHTML = `
             <div class="action-buttons">
                 <button class="btn" onclick="editAccount('${escapeForJs(account.id)}')">Edit</button>
@@ -854,24 +734,17 @@ function cancelAccountEdit(id) {
             </div>
         `;
     } else {
-        // if account not found, re-render overall
         if (isSearchActive) renderSearchResults(); else renderAccounts();
     }
     row.classList.remove('editing-row');
 }
 
-/**
- * confirmDeleteAccount(id)
- */
 function confirmDeleteAccount(id) {
     const account = accounts.find(a => a.id === id);
     if (!account) { showMessage('Account not found', 'error'); return; }
     showConfirmModal(`Delete account for ${account.email}?`, () => deleteAccountConfirmed(id));
 }
 
-/**
- * deleteAccountConfirmed(id)
- */
 async function deleteAccountConfirmed(id) {
     try {
         showLoading();
@@ -892,10 +765,6 @@ async function deleteAccountConfirmed(id) {
 /* ============================================================
    SECTION: Bulk Upload Handlers
    ============================================================ */
-
-/**
- * openBulkUpload(clientName)
- */
 function openBulkUpload(clientName) {
     currentBulkClient = clientName;
     const modal = document.getElementById('bulkUploadModal');
@@ -904,41 +773,26 @@ function openBulkUpload(clientName) {
     if (modal) modal.style.display = 'block';
 }
 
-/**
- * closeBulkUploadModal()
- */
 function closeBulkUploadModal() {
     currentBulkClient = null;
     const modal = document.getElementById('bulkUploadModal');
     if (modal) modal.style.display = 'none';
 }
 
-/**
- * processBulkUpload()
- * Accepts lines:
- * email
- * email,YYYY-MM-DD
- * email,YYYY-MM-DD,order1,order2|2,order3|3,order4,order5
- * where orderX|Y sets duration Y for that order slot (1/2/3)
- */
 async function processBulkUpload() {
     const input = document.getElementById('bulkEmailInput');
     if (!input) { showMessage('Bulk input not found', 'error'); return; }
     const raw = input.value.trim();
     if (!raw) { showMessage('Please paste or type emails', 'error'); return; }
-
     const lines = raw.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
     const accountsToAdd = [];
     const errors = [];
-
     lines.forEach((line, idx) => {
         const parts = line.split(',').map(p => p.trim());
         const email = parts[0] || '';
         let date = parts[1] || getTodayFormatted();
-
         const orderNumbers = [];
         const orderDurations = [];
-
         if (parts.length > 2) {
             for (let i = 2; i < parts.length && orderNumbers.length < MAX_ORDER_SLOTS; i++) {
                 const piece = parts[i];
@@ -947,7 +801,6 @@ async function processBulkUpload() {
                     orderDurations.push('1');
                     continue;
                 }
-                // allow order|duration
                 const sub = piece.split('|').map(s => s.trim());
                 const ord = sanitizeOrderNumber(sub[0] || '');
                 const dur = (sub[1] && ['1','2','3'].includes(sub[1])) ? sub[1] : '1';
@@ -957,7 +810,6 @@ async function processBulkUpload() {
         }
         while (orderNumbers.length < MAX_ORDER_SLOTS) orderNumbers.push('');
         while (orderDurations.length < MAX_ORDER_SLOTS) orderDurations.push('1');
-
         if (!validateEmail(email)) {
             errors.push(`Line ${idx+1}: invalid email "${email}"`);
             return;
@@ -967,7 +819,6 @@ async function processBulkUpload() {
             errors.push(`Line ${idx+1}: invalid date "${date}" (use YYYY-MM-DD)`);
             return;
         }
-
         accountsToAdd.push({
             client: currentBulkClient || 'Unknown',
             email: email,
@@ -976,7 +827,6 @@ async function processBulkUpload() {
             orderDurations: orderDurations
         });
     });
-
     if (errors.length) {
         showMessage(errors.join('\n'), 'error');
         return;
@@ -985,7 +835,6 @@ async function processBulkUpload() {
         showMessage('No valid accounts to upload', 'error');
         return;
     }
-
     try {
         showLoading();
         await bulkSaveAccounts(accountsToAdd);
@@ -1001,38 +850,22 @@ async function processBulkUpload() {
 }
 
 /* ============================================================
-   SECTION: Move Email - Modal + Logic (in-site, suggests existing clients)
+   SECTION: Move Email
    ============================================================ */
-
-/**
- * openMoveEmailModal(accountId)
- * - populates move modal with client list and selects current client by default
- */
 function openMoveEmailModal(accountId) {
     const account = accounts.find(a => a.id === accountId);
     if (!account) { showMessage('Account not found', 'error'); return; }
     moveEmailTargetAccountId = accountId;
-
     const modal = document.getElementById('moveEmailModal');
     const select = document.getElementById('moveClientSelect');
     if (!modal || !select) { showMessage('Move modal missing', 'error'); return; }
-
-    // clear select
     select.innerHTML = '';
-
-    // option: keep current client as selected but also allow "Create new client" option
-    // Build options from clients array (unique)
     const uniqueClients = Array.from(new Set(clients.concat(accounts.map(a=>a.client)))).filter(Boolean);
-    // ensure current client is present
     if (!uniqueClients.includes(account.client)) uniqueClients.unshift(account.client);
-
-    // add placeholder option
     const placeholder = document.createElement('option');
     placeholder.value = '';
     placeholder.textContent = '-- Select client --';
     select.appendChild(placeholder);
-
-    // add current client option first
     uniqueClients.forEach(c => {
         const opt = document.createElement('option');
         opt.value = c;
@@ -1040,18 +873,11 @@ function openMoveEmailModal(accountId) {
         if (c === account.client) opt.selected = true;
         select.appendChild(opt);
     });
-
-    // add "Create new client" option
     const createOpt = document.createElement('option');
     createOpt.value = '__create_new__';
     createOpt.textContent = '➕ Create new client...';
     select.appendChild(createOpt);
-
-    // show modal
     modal.style.display = 'block';
-
-    // when create new selected, show a prompt inline (to keep everything inside site, we'll add an inline input)
-    // We will create an inline input if needed
     select.onchange = function() {
         const val = select.value;
         let existingInline = document.getElementById('moveNewClientInline');
@@ -1071,17 +897,12 @@ function openMoveEmailModal(accountId) {
     };
 }
 
-/**
- * confirmMoveEmailHandler()
- * - called when user clicks Confirm in move modal
- */
 async function confirmMoveEmailHandler() {
     const modal = document.getElementById('moveEmailModal');
     const select = document.getElementById('moveClientSelect');
     if (!select || !modal) { showMessage('Move modal missing', 'error'); return; }
     const val = select.value;
     let targetClient = val;
-
     if (val === '') {
         showMessage('Please select a client or choose Create new client', 'error');
         return;
@@ -1094,30 +915,22 @@ async function confirmMoveEmailHandler() {
         }
         targetClient = inline.value.trim();
     }
-
     if (!moveEmailTargetAccountId) {
         showMessage('No account selected to move', 'error');
         return;
     }
-
-    // proceed to update the account's client
     const account = accounts.find(a => a.id === moveEmailTargetAccountId);
     if (!account) { showMessage('Account not found', 'error'); return; }
-
     const oldClient = account.client;
     account.client = targetClient;
-
     try {
         showLoading();
         await updateAccount(account.id, account);
-        // update local clients list
         if (!clients.includes(targetClient)) clients.push(targetClient);
-        // remove old client if no accounts left
         const stillOld = accounts.some(a => a.client === oldClient && a.id !== account.id);
         if (!stillOld) clients = clients.filter(c => c !== oldClient);
         hideLoading();
         showMessage(`Moved ${account.email} to ${targetClient}`);
-        // close modal and cleanup
         closeMoveEmailModal();
         renderAccounts();
         renderExpiringAccounts();
@@ -1129,16 +942,11 @@ async function confirmMoveEmailHandler() {
     }
 }
 
-/**
- * closeMoveEmailModal()
- */
 function closeMoveEmailModal() {
     const modal = document.getElementById('moveEmailModal');
     if (!modal) return;
-    // cleanup inline input if exists
     const inline = document.getElementById('moveNewClientInline');
     if (inline) inline.remove();
-    // clear select onchange handler
     const select = document.getElementById('moveClientSelect');
     if (select) select.onchange = null;
     moveEmailTargetAccountId = null;
@@ -1146,9 +954,8 @@ function closeMoveEmailModal() {
 }
 
 /* ============================================================
-   SECTION: Export Functions (CSV / Excel / JSON)
+   SECTION: Export Functions
    ============================================================ */
-
 function exportToCSV() {
     const data = isSearchActive ? filteredAccounts : accounts;
     if (!data || data.length === 0) { showMessage('No accounts to export', 'error'); return; }
@@ -1159,7 +966,6 @@ function exportToCSV() {
             cols.push(acc.orderNumbers && acc.orderNumbers[i] ? acc.orderNumbers[i] : '');
             cols.push(acc.orderDurations && acc.orderDurations[i] ? acc.orderDurations[i] : '1');
         }
-        // escape each cell with double quotes and replace inner quotes
         return cols.map(c => `"${String(c||'').replace(/"/g,'""')}"`).join(',');
     });
     const csv = [headers.join(','), ...rows].join('\n');
@@ -1182,7 +988,6 @@ function exportToExcel() {
     for (let i=0;i<MAX_ORDER_SLOTS;i++) {
         headerCells.push(`Order ${i+1}`, `Duration ${i+1}`);
     }
-
     const rowsXml = data.map(acc => {
         const cells = [
             `<Cell><Data ss:Type="String">${escapeHtml(acc.client)}</Data></Cell>`,
@@ -1195,7 +1000,6 @@ function exportToExcel() {
         }
         return `<Row>${cells.join('')}</Row>`;
     }).join('\n');
-
     const xml = `<?xml version="1.0"?>
     <Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet" xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">
       <Worksheet ss:Name="Accounts">
@@ -1205,7 +1009,6 @@ function exportToExcel() {
         </Table>
       </Worksheet>
     </Workbook>`;
-
     const blob = new Blob([xml], { type: 'application/vnd.ms-excel' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -1242,40 +1045,38 @@ function exportToJSON() {
 }
 
 /* ============================================================
-   SECTION: Search (Unified)
+   SECTION: Search (Fixed for comma-separated emails)
    ============================================================ */
-
-/**
- * performSearch()
- * - uses #unifiedSearchInput and searches email, client, and order numbers
- */
 function performSearch() {
     const input = document.getElementById('unifiedSearchInput');
     if (!input) { showMessage('Search input not found', 'error'); return; }
-    const q = input.value.trim().toLowerCase();
+    let q = input.value.trim();
     if (!q) {
         clearSearch();
         return;
     }
-
+    
+    // Handle comma-separated emails
+    const searchTerms = q.split(/[,;]/).map(s => s.trim().toLowerCase()).filter(s => s);
     filteredAccounts = accounts.filter(acc => {
         const email = (acc.email || '').toLowerCase();
         const client = (acc.client || '').toLowerCase();
         const orders = (acc.orderNumbers || []).map(o => (o||'').toLowerCase());
-        return email.includes(q) || client.includes(q) || orders.some(o => o.includes(q));
+        
+        return searchTerms.some(term => 
+            email.includes(term) || 
+            client.includes(term) || 
+            orders.some(o => o.includes(term))
+        );
     });
-
+    
     isSearchActive = true;
     renderSearchResults();
-
     if (!filteredAccounts || filteredAccounts.length === 0) {
         showMessage('No accounts found', 'error');
     }
 }
 
-/**
- * clearSearch()
- */
 function clearSearch() {
     const input = document.getElementById('unifiedSearchInput');
     if (input) input.value = '';
@@ -1286,14 +1087,14 @@ function clearSearch() {
 }
 
 /* ============================================================
-   SECTION: Small utilities (validation, escaping for onclick)
+   SECTION: Utilities
    ============================================================ */
-
 function validateEmail(email) {
     if (!email) return false;
     const re = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     return re.test(email);
 }
+
 function validateDate(dateString) {
     if (!dateString) return true;
     const re = /^\d{4}-\d{2}-\d{2}$/;
@@ -1301,18 +1102,18 @@ function validateDate(dateString) {
     const d = new Date(dateString);
     return d instanceof Date && !isNaN(d);
 }
+
 function escapeForJs(s) {
     if (s === null || s === undefined) return '';
     return String(s).replace(/'/g, "\\'").replace(/"/g, '&quot;');
 }
 
 /* ============================================================
-   SECTION: Order copy button handler (delegation)
+   SECTION: Event Delegation
    ============================================================ */
 document.addEventListener('click', function(e) {
     const el = e.target;
     if (!el) return;
-    // order copy button may be a button with class order-copy-btn
     if (el.classList && el.classList.contains('order-copy-btn')) {
         const v = el.getAttribute('data-copy') || '';
         if (v) copyToClipboardSafe(v, `Order "${v}" copied`);
@@ -1322,14 +1123,12 @@ document.addEventListener('click', function(e) {
 });
 
 /* ============================================================
-   SECTION: Confirm modal helper
+   SECTION: Confirm Modal
    ============================================================ */
-
 function showConfirmModal(message, onConfirm) {
     const modal = document.getElementById('confirmModal');
     const messageEl = document.getElementById('confirmMessage');
     if (!modal || !messageEl) {
-        // fallback to built-in confirm
         if (confirm(message)) onConfirm();
         return;
     }
@@ -1345,14 +1144,11 @@ function showConfirmModal(message, onConfirm) {
 }
 
 /* ============================================================
-   SECTION: Event Wiring (DOMContentLoaded)
+   SECTION: Event Wiring
    ============================================================ */
-
 document.addEventListener('DOMContentLoaded', function() {
-    // initial load
     if (db) loadAccounts();
-
-    // wire search
+    
     const unifiedSearchBtn = document.getElementById('unifiedSearchBtn');
     const unifiedSearchInput = document.getElementById('unifiedSearchInput');
     const clearUnifiedSearchBtn = document.getElementById('clearUnifiedSearchBtn');
@@ -1360,46 +1156,37 @@ document.addEventListener('DOMContentLoaded', function() {
     if (clearUnifiedSearchBtn) clearUnifiedSearchBtn.addEventListener('click', clearSearch);
     if (unifiedSearchInput) {
         unifiedSearchInput.addEventListener('keypress', function(e) { if (e.key === 'Enter') performSearch(); });
-        // debounce input
         unifiedSearchInput.addEventListener('input', debounce(performSearch, 300));
     }
-
-    // export buttons
+    
     const exportCSVBtn = document.getElementById('exportCSVBtn');
     const exportExcelBtn = document.getElementById('exportExcelBtn');
     const exportJSONBtn = document.getElementById('exportJSONBtn');
     if (exportCSVBtn) exportCSVBtn.addEventListener('click', exportToCSV);
     if (exportExcelBtn) exportExcelBtn.addEventListener('click', exportToExcel);
     if (exportJSONBtn) exportJSONBtn.addEventListener('click', exportToJSON);
-
-    // bulk upload buttons
+    
     const processBulkBtn = document.getElementById('processBulkUpload');
     const cancelBulkBtn = document.getElementById('cancelBulkUpload');
     if (processBulkBtn) processBulkBtn.addEventListener('click', processBulkUpload);
     if (cancelBulkBtn) cancelBulkBtn.addEventListener('click', closeBulkUploadModal);
-
-    // close icons
+    
     document.querySelectorAll('.close').forEach(c => c.addEventListener('click', function() {
         const m = this.closest('.modal');
         if (m) m.style.display = 'none';
     }));
-
-    // confirm modal click handlers are set when modal opened
-
-    // move email modal confirm/cancel
+    
     const confirmMoveEmailBtn = document.getElementById('confirmMoveEmail');
     const cancelMoveEmailBtn = document.getElementById('cancelMoveEmail');
     if (confirmMoveEmailBtn) confirmMoveEmailBtn.addEventListener('click', confirmMoveEmailHandler);
     if (cancelMoveEmailBtn) cancelMoveEmailBtn.addEventListener('click', closeMoveEmailModal);
-
-    // click outside modal to close
+    
     window.addEventListener('click', function(e) {
         document.querySelectorAll('.modal').forEach(modal => {
             if (e.target === modal) modal.style.display = 'none';
         });
     });
-
-    // keyboard shortcuts
+    
     window.addEventListener('keydown', function(e) {
         if (e.key === 'Escape') {
             document.querySelectorAll('.modal').forEach(m => m.style.display = 'none');
@@ -1417,7 +1204,7 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 
 /* ============================================================
-   SECTION: Debounce utility
+   SECTION: Debounce
    ============================================================ */
 function debounce(fn, wait) {
     let t;
@@ -1428,55 +1215,9 @@ function debounce(fn, wait) {
 }
 
 /* ============================================================
-   SECTION: Legacy order search helpers (if your HTML still has orderSearchInput)
-   ============================================================ */
-
-function searchByOrderNumber() {
-    const orderInput = document.getElementById('orderSearchInput');
-    if (!orderInput) return;
-    const q = orderInput.value.trim().toLowerCase();
-    if (!q) {
-        document.getElementById('orderResults') && (document.getElementById('orderResults').style.display = 'none');
-        return;
-    }
-    const matches = accounts.filter(acc => acc.orderNumbers && acc.orderNumbers.some(o => (o||'').toLowerCase().includes(q)));
-    renderOrderSearchResults(matches, q);
-}
-function renderOrderSearchResults(matches, query) {
-    const resultsDiv = document.getElementById('orderResults');
-    if (!resultsDiv) return;
-    if (!matches || matches.length === 0) {
-        resultsDiv.innerHTML = `<div class="no-data">No accounts found with order number containing "${escapeHtml(query)}"</div>`;
-        resultsDiv.style.display = 'block';
-        return;
-    }
-    const html = matches.map(acc => {
-        const matching = acc.orderNumbers.filter(o => (o||'').toLowerCase().includes(query)).join(', ');
-        return `
-            <div class="order-match">
-                <div class="order-match-header">${escapeHtml(acc.client)} - ${escapeHtml(acc.email)}</div>
-                <div class="order-match-details">Matching Orders: <strong>${escapeHtml(matching)}</strong><br>All: ${escapeHtml((acc.orderNumbers||[]).filter(Boolean).join(', '))}<br>Exp: ${formatDateForDisplay(acc.date)}</div>
-            </div>
-        `;
-    }).join('');
-    resultsDiv.innerHTML = `<h4>Found ${matches.length} account${matches.length !== 1 ? 's' : ''}</h4>${html}`;
-    resultsDiv.style.display = 'block';
-}
-function clearOrderSearch() {
-    const orderInput = document.getElementById('orderSearchInput');
-    if (orderInput) orderInput.value = '';
-    const orderResults = document.getElementById('orderResults');
-    if (orderResults) orderResults.style.display = 'none';
-}
-
-/* ============================================================
-   SECTION: Safe global error handler
+   SECTION: Global Error Handler
    ============================================================ */
 window.addEventListener('error', function(e) {
     console.error('Global error:', e.error || e.message || e);
     showMessage('An unexpected error occurred', 'error');
 });
-
-/* ============================================================
-   END OF FILE - script.js
-   ============================================================ */

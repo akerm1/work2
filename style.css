@@ -228,6 +228,7 @@ th {
 
 .action-buttons {
     display: flex;
+    flex-direction: column;
     gap: 5px;
     flex-wrap: wrap;
 }
@@ -487,11 +488,12 @@ th {
 }
 
 .order-inputs input {
-    padding: 6px 8px;
+    padding: 8px 10px;
     border: 1px solid #e2e8f0;
     border-radius: 6px;
-    font-size: 12px;
+    font-size: 14px;
     text-align: center;
+    min-width: 120px;
 }
 
 .order-search-section {
