@@ -1,0 +1,414 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Email Account Organizer</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <div class="header-content">
+                <div class="header-left">
+                    <h1>Email Account Organizer</h1>
+                    <p class="header-subtitle" id="headerStats">Loading...</p>
+                </div>
+                <div class="header-actions">
+                    <button id="darkModeBtn" class="btn btn-icon" onclick="toggleDarkMode()" title="Toggle Dark Mode">
+                        <span id="darkModeIcon">&#9789;</span>
+                    </button>
+                    <button id="notificationSettingsBtn" class="btn btn-notification" onclick="openNotificationSettings()">
+                        <span class="bell-icon">&#128276;</span> <span id="notifBtnText">Notifications</span>
+                    </button>
+                </div>
+            </div>
+        </header>
+
+        <!-- Stats Dashboard -->
+        <section class="stats-section" id="statsSection">
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-number" id="statTotal">0</div>
+                    <div class="stat-label">Total Accounts</div>
+                </div>
+                <div class="stat-card stat-warning">
+                    <div class="stat-number" id="statExpiring">0</div>
+                    <div class="stat-label">Expiring Soon</div>
+                </div>
+                <div class="stat-card stat-danger">
+                    <div class="stat-number" id="statExpired">0</div>
+                    <div class="stat-label">Expired</div>
+                </div>
+                <div class="stat-card stat-purple">
+                    <div class="stat-number" id="statProblems">0</div>
+                    <div class="stat-label">Problems</div>
+                </div>
+                <div class="stat-card stat-teal">
+                    <div class="stat-number" id="statClients">0</div>
+                    <div class="stat-label">Clients</div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Bulk Actions Bar -->
+        <div class="bulk-actions-bar" id="bulkActionsBar" style="display:none;">
+            <div class="bulk-info">
+                <span id="bulkCount">0</span> selected
+            </div>
+            <div class="bulk-buttons">
+                <button class="btn btn-small btn-secondary" onclick="bulkExportSelected()">Export Selected</button>
+                <button class="btn btn-small btn-warning" onclick="openBulkEditModal()">Bulk Edit</button>
+                <button class="btn btn-small btn-copy" onclick="bulkCopyEmails()">Copy Emails</button>
+                <button class="btn btn-small btn-danger" onclick="bulkDeleteSelected()">Delete Selected</button>
+                <button class="btn btn-small btn-secondary" onclick="clearSelection()">Deselect All</button>
+            </div>
+        </div>
+
+        <!-- Search Section -->
+        <div class="search-section">
+            <div class="section-header" onclick="toggleSection('searchContent')">
+                <h3>&#128269; Search Accounts</h3>
+                <span class="toggle-arrow" id="searchArrow">&#9660;</span>
+            </div>
+            <div id="searchContent">
+                <div class="search-controls">
+                    <div class="search-inputs">
+                        <input type="text" id="emailSearchInput" placeholder="Search by email..." />
+                        <input type="number" id="dateSearchInput" min="1" max="31" placeholder="Day (1-31)" />
+                        <input type="text" id="clientSearchInput" placeholder="Search by client..." />
+                        <select id="statusFilter" class="filter-select">
+                            <option value="">All Status</option>
+                            <option value="ok">OK</option>
+                            <option value="problem">Problem</option>
+                            <option value="expiring">Expiring Soon</option>
+                            <option value="expired">Expired</option>
+                        </select>
+                    </div>
+                    <div class="search-buttons">
+                        <button id="searchBtn" class="btn btn-primary">Search</button>
+                        <button id="clearSearchBtn" class="btn btn-secondary">Clear</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Export Section -->
+        <div class="export-section">
+            <div class="section-header" onclick="toggleSection('exportContent')">
+                <h3>&#128230; Export Data</h3>
+                <span class="toggle-arrow" id="exportArrow">&#9660;</span>
+            </div>
+            <div id="exportContent">
+                <div class="export-buttons">
+                    <button id="exportCSVBtn" class="btn btn-success">Export CSV</button>
+                    <button id="exportExcelBtn" class="btn btn-success">Export Excel</button>
+                    <button id="exportJSONBtn" class="btn btn-success">Export JSON</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Search Results -->
+        <div id="searchResults" class="search-results" style="display: none;">
+            <div class="section-header">
+                <h3>Search Results <span id="resultCount" class="result-badge"></span></h3>
+                <div class="section-actions">
+                    <button class="btn btn-small btn-primary" onclick="selectAllFiltered()">Select All</button>
+                </div>
+            </div>
+            <div class="table-container">
+                <table>
+                    <thead>
+                        <tr>
+                            <th class="checkbox-col"><input type="checkbox" id="selectAllSearch" onchange="toggleSelectAll(this, 'search')"></th>
+                            <th class="sortable" onclick="sortSearchResults('client')">Client <span class="sort-icon">&#8693;</span></th>
+                            <th class="sortable" onclick="sortSearchResults('email')">Email <span class="sort-icon">&#8693;</span></th>
+                            <th class="sortable" onclick="sortSearchResults('date')">Day <span class="sort-icon">&#8693;</span></th>
+                            <th>Replacement</th>
+                            <th>Status</th>
+                            <th>Days Left</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="searchResultsBody"></tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Expiring Accounts -->
+        <section class="expiring-section">
+            <div class="section-header" onclick="toggleSection('expiringContent')">
+                <h2 id="expiringSectionTitle">Accounts Expiring Soon</h2>
+                <span class="toggle-arrow" id="expiringArrow">&#9660;</span>
+            </div>
+            <div id="expiringContent">
+                <div class="table-container">
+                    <table id="expiringTable">
+                        <thead>
+                            <tr>
+                                <th class="checkbox-col"><input type="checkbox" id="selectAllExpiring" onchange="toggleSelectAll(this, 'expiring')"></th>
+                                <th>Client</th>
+                                <th>Email</th>
+                                <th>Day</th>
+                                <th>Replacement</th>
+                                <th>Status</th>
+                                <th>Days Left</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="expiringTableBody"></tbody>
+                    </table>
+                    <div id="noExpiringAccounts" class="no-data" style="display: none;">
+                        No accounts expiring soon
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Problem Accounts Section -->
+        <section class="problems-section">
+            <div class="section-header" onclick="toggleSection('problemsContent')">
+                <h2>Problem Accounts</h2>
+                <span class="toggle-arrow" id="problemsArrow">&#9660;</span>
+            </div>
+            <div id="problemsContent">
+                <div class="table-container">
+                    <table id="problemsTable">
+                        <thead>
+                            <tr>
+                                <th class="checkbox-col"><input type="checkbox" id="selectAllProblems" onchange="toggleSelectAll(this, 'problems')"></th>
+                                <th>Client</th>
+                                <th>Email</th>
+                                <th>Day</th>
+                                <th>Replacement</th>
+                                <th>Problem Note</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="problemsTableBody"></tbody>
+                    </table>
+                    <div id="noProblemAccounts" class="no-data" style="display: none;">
+                        No accounts marked with problems
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Accounts Section -->
+        <section class="accounts-section">
+            <div class="section-header" onclick="toggleSection('accountsContent')">
+                <h2>All Accounts by Client</h2>
+                <span class="toggle-arrow" id="accountsArrow">&#9660;</span>
+            </div>
+            <div id="accountsContent">
+                <div id="clientsContainer"></div>
+                <div class="add-client-section">
+                    <button id="addClientBtn" class="btn btn-primary">+ Add New Client</button>
+                    <div id="newClientForm" class="new-client-form" style="display: none;">
+                        <input type="text" id="newClientName" placeholder="Enter client name">
+                        <button id="saveClientBtn" class="btn btn-success">Save</button>
+                        <button id="cancelClientBtn" class="btn btn-secondary">Cancel</button>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </div>
+
+    <!-- Bulk Upload Modal -->
+    <div id="bulkUploadModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Bulk Upload Emails</h3>
+                <span class="close">&times;</span>
+            </div>
+            <div class="modal-body">
+                <p>Paste emails (one per line). Format:</p>
+                <pre><code>email@example.com</code> or <code>email@example.com,15</code></pre>
+                <textarea id="bulkEmailInput" placeholder="email1@example.com&#10;email2@example.com,15"></textarea>
+                <div class="modal-actions">
+                    <button id="processBulkUpload" class="btn btn-primary">Upload Emails</button>
+                    <button id="cancelBulkUpload" class="btn btn-secondary">Cancel</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bulk Edit Modal -->
+    <div id="bulkEditModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Bulk Edit Selected Accounts</h3>
+                <span class="close">&times;</span>
+            </div>
+            <div class="modal-body">
+                <div class="bulk-edit-options">
+                    <div class="form-group">
+                        <label>Change Expiration Date</label>
+                        <input type="number" id="bulkEditDate" min="1" max="31" placeholder="Day (1-31)">
+                        <p class="form-hint">Leave empty to keep current dates</p>
+                    </div>
+                    <div class="form-group">
+                        <label>Set Replacement Email</label>
+                        <input type="email" id="bulkEditReplacement" placeholder="replacement@example.com">
+                        <p class="form-hint">Leave empty to keep current replacements</p>
+                    </div>
+                    <div class="form-group">
+                        <label>
+                            <input type="checkbox" id="bulkEditClearProblems"> Clear all problem flags
+                        </label>
+                    </div>
+                    <div class="form-group">
+                        <label>
+                            <input type="checkbox" id="bulkEditMarkProblems"> Mark all as problems
+                        </label>
+                    </div>
+                </div>
+                <div class="modal-actions">
+                    <button class="btn btn-primary" onclick="processBulkEdit()">Apply Changes</button>
+                    <button class="btn btn-secondary" onclick="document.getElementById('bulkEditModal').style.display='none'">Cancel</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Replacement Modal -->
+    <div id="replacementModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Replace Email</h3>
+                <span class="close">&times;</span>
+            </div>
+            <div class="modal-body">
+                <p id="replacementCurrentEmail"></p>
+                <input type="email" id="replacementEmailInput" placeholder="Enter replacement email" class="modal-input">
+                <div class="modal-actions">
+                    <button id="saveReplacementBtn" class="btn btn-success">Save Replacement</button>
+                    <button id="clearReplacementBtn" class="btn btn-warning">Clear Replacement</button>
+                    <button id="cancelReplacementBtn" class="btn btn-secondary">Cancel</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Problem Modal -->
+    <div id="problemModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Mark Problem</h3>
+                <span class="close">&times;</span>
+            </div>
+            <div class="modal-body">
+                <p id="problemCurrentEmail"></p>
+                <textarea id="problemNoteInput" placeholder="Describe the problem (optional)" class="modal-textarea"></textarea>
+                <div class="modal-actions">
+                    <button id="saveProblemBtn" class="btn btn-danger">Mark as Problem</button>
+                    <button id="clearProblemBtn" class="btn btn-success">Clear Problem</button>
+                    <button id="cancelProblemBtn" class="btn btn-secondary">Cancel</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Confirmation Modal -->
+    <div id="confirmModal" class="modal">
+        <div class="modal-content modal-small">
+            <div class="modal-body">
+                <p id="confirmMessage">Are you sure?</p>
+                <div class="modal-actions">
+                    <button id="confirmYes" class="btn btn-danger">Yes</button>
+                    <button id="confirmNo" class="btn btn-secondary">No</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Notification Settings Modal -->
+    <div id="notificationSettingsModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Notification Settings</h3>
+                <span class="close">&times;</span>
+            </div>
+            <div class="modal-body">
+                <div class="settings-group">
+                    <label class="settings-label">
+                        <span>Enable Desktop Notifications</span>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="notificationsEnabled" checked>
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </label>
+                    <p class="settings-hint">Receive browser notifications when accounts are about to expire.</p>
+                </div>
+                <div class="settings-group">
+                    <label class="settings-label" for="notifyDaysBefore">Notify me days before expiration</label>
+                    <div class="days-input-row">
+                        <input type="number" id="notifyDaysBefore" min="1" max="365" value="30" class="days-input">
+                        <span class="days-label">day(s) before</span>
+                    </div>
+                </div>
+                <div class="settings-group">
+                    <label class="settings-label">
+                        <span>Also notify on the expiration day</span>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="notifyOnExpirationDay" checked>
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </label>
+                </div>
+                <div class="settings-group">
+                    <label class="settings-label">
+                        <span>Also notify for already expired accounts</span>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="notifyExpired">
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </label>
+                </div>
+
+                <hr style="border:none; border-top:1px solid var(--border-color); margin: 16px 0;">
+
+                <div class="settings-group">
+                    <label class="settings-label">
+                        <span>Telegram Notifications</span>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="telegramEnabled">
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </label>
+                    <p class="settings-hint">Send expiry alerts to your Telegram account.</p>
+                </div>
+                <div class="settings-group">
+                    <label class="settings-label" for="telegramBotToken">Bot Token</label>
+                    <input type="text" id="telegramBotToken" class="days-input" style="width:100%; box-sizing:border-box;" placeholder="123456:ABC-DEF...">
+                </div>
+                <div class="settings-group">
+                    <label class="settings-label" for="telegramChatId">Chat ID</label>
+                    <input type="text" id="telegramChatId" class="days-input" style="width:100%; box-sizing:border-box;" placeholder="Your Telegram Chat ID">
+                </div>
+                <div class="settings-group">
+                    <button class="btn btn-secondary" onclick="testTelegramConnection()" type="button">Test Telegram</button>
+                </div>
+
+                <div class="modal-actions">
+                    <button class="btn btn-success" onclick="saveNotificationSettings()">Save Settings</button>
+                    <button class="btn btn-secondary" onclick="document.getElementById('notificationSettingsModal').style.display='none'">Cancel</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Loading Spinner -->
+    <div id="loadingSpinner" class="loading-spinner">
+        <div class="spinner"></div>
+        <p>Loading...</p>
+    </div>
+
+    <!-- Firebase SDKs -->
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
+
+    <script src="script.js"></script>
+</body>
+</html>
