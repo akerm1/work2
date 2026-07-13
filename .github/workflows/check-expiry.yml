@@ -2,7 +2,7 @@ name: Check Email Expiry & Notify Telegram
 
 on:
   schedule:
-    - cron: '15 19 * * *'  # 20:15 Algeria time (UTC+1)
+    - cron: '17 19 * * *'  # 20:17 Algeria time (UTC+1)
   workflow_dispatch:        # Manual trigger
 
 jobs:
