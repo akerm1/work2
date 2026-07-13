@@ -2,20 +2,20 @@ name: Check Email Expiry & Notify Telegram
 
 on:
   schedule:
-    - cron: '0 * * * *'  # Every hour
-  workflow_dispatch:      # Manual trigger
+    - cron: '50 18 * * *'  # 19:50 Algeria time (UTC+1)
+  workflow_dispatch:        # Manual trigger
 
 jobs:
   check-expiry:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
-          node-version: '20'
+          node-version: '22'
 
       - name: Install dependencies
         run: npm install
@@ -28,4 +28,5 @@ jobs:
           NOTIFY_DAYS_BEFORE: '30'
           NOTIFY_EXPIRED: 'true'
           NOTIFY_EXPIRATION_DAY: 'true'
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
         run: node check-expiry.js

@@ -4,7 +4,8 @@
   "description": "Checks email account expiry and sends Telegram notifications",
   "main": "check-expiry.js",
   "scripts": {
-    "check": "node check-expiry.js"
+    "check": "node check-expiry.js",
+    "start": "node check-expiry.js"
   },
   "dependencies": {
     "firebase-admin": "^12.0.0"
