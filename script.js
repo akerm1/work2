@@ -72,11 +72,16 @@ function getDaysUntilExpiry(dayValue) {
     if (day === null) return null;
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-    const thisMonth = new Date(today.getFullYear(), today.getMonth(), day);
-    if (thisMonth >= today) {
-        return Math.round((thisMonth - today) / (1000 * 60 * 60 * 24));
+    const thisMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+    const lastDayThisMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate();
+    const clampedDay = Math.min(day, lastDayThisMonth);
+    const thisMonthDate = new Date(today.getFullYear(), today.getMonth(), clampedDay);
+    if (thisMonthDate >= today) {
+        return Math.round((thisMonthDate - today) / (1000 * 60 * 60 * 24));
     }
-    const nextMonth = new Date(today.getFullYear(), today.getMonth() + 1, day);
+    const lastDayNextMonth = new Date(today.getFullYear(), today.getMonth() + 2, 0).getDate();
+    const clampedDayNext = Math.min(day, lastDayNextMonth);
+    const nextMonth = new Date(today.getFullYear(), today.getMonth() + 1, clampedDayNext);
     return Math.round((nextMonth - today) / (1000 * 60 * 60 * 24));
 }
 
@@ -108,6 +113,10 @@ function showMessage(message, type = 'success') {
 function escapeHtml(text) {
     const map = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' };
     return String(text).replace(/[&<>"']/g, m => map[m]);
+}
+
+function escapeJS(text) {
+    return String(text).replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '\\"').replace(/\n/g, '\\n').replace(/\r/g, '\\r');
 }
 
 function copyToClipboard(text) {
@@ -429,9 +438,6 @@ function startNotificationChecker() {
 async function loadAccounts() {
     if (!db) {
         try {
-            if (typeof firebase !== 'undefined' && !firebase.apps.length) {
-                firebase.initializeApp(firebaseConfig);
-            }
             db = firebase.firestore();
             db.enablePersistence({ synchronizeTabs: true }).catch(() => {});
         } catch (e) {
@@ -643,9 +649,9 @@ function bulkDeleteSelected() {
             updateBulkBar();
             hideLoading();
             showMessage(`Deleted ${count} accounts`);
-        clients = [...new Set(accounts.map(a => a.client))].filter(Boolean);
-        loadRetryCount = 0;
-        updateStats();
+            clients = [...new Set(accounts.map(a => a.client))].filter(Boolean);
+            loadRetryCount = 0;
+            updateStats();
             renderAccounts();
             renderExpiringAccounts();
             renderProblemAccounts();
@@ -774,8 +780,9 @@ function sortSearchResults(column) {
         let valA = a[column] || '';
         let valB = b[column] || '';
         if (column === 'date') {
-            valA = a.date || '9999-99-99';
-            valB = b.date || '9999-99-99';
+            valA = extractDay(a.date) || 9999;
+            valB = extractDay(b.date) || 9999;
+            return sortDirection === 'asc' ? valA - valB : valB - valA;
         }
         valA = valA.toLowerCase();
         valB = valB.toLowerCase();
@@ -809,7 +816,7 @@ function renderSearchResults() {
         <tr>
             <td colspan="8" class="client-header-row">
                 <span class="client-name">${escapeHtml(client)} (${byClient[client].length})</span>
-                <button class="btn btn-copy btn-small" onclick="copyToClipboard('${byClient[client].map(a => a.email).join(', ')}')">Copy All</button>
+                <button class="btn btn-copy btn-small" onclick="copyToClipboard(decodeURIComponent(this.dataset.emails))" data-emails="${encodeURIComponent(byClient[client].map(a => a.email).join(', '))}">Copy All</button>
             </td>
         </tr>
         ${byClient[client].map(a => createAccountRowHTML(a, true)).join('')}
@@ -904,9 +911,9 @@ function createClientSection(clientName, clientAccounts) {
         <div class="client-header">
             <div class="client-name">${escapeHtml(clientName)} (${clientAccounts.length})</div>
             <div class="client-actions">
-                <button class="btn btn-success btn-small" onclick="addNewAccount('${escapeHtml(clientName)}')">+ Add</button>
-                <button class="btn btn-primary btn-small" onclick="openBulkUpload('${escapeHtml(clientName)}')">+ Bulk</button>
-                <button class="btn btn-copy btn-small" onclick="copyToClipboard('${clientAccounts.map(a => a.email).join(', ')}')">Copy All</button>
+                <button class="btn btn-success btn-small" onclick="addNewAccount(decodeURIComponent(this.dataset.client))" data-client="${encodeURIComponent(clientName)}">+ Add</button>
+                <button class="btn btn-primary btn-small" onclick="openBulkUpload(decodeURIComponent(this.dataset.client))" data-client="${encodeURIComponent(clientName)}">+ Bulk</button>
+                <button class="btn btn-copy btn-small" onclick="copyToClipboard(decodeURIComponent(this.dataset.emails))" data-emails="${encodeURIComponent(clientAccounts.map(a => a.email).join(', '))}">Copy All</button>
             </div>
         </div>
         <div class="table-container" style="max-height:${showToggle && !isExpanded ? '300px' : 'none'};overflow-y:${showToggle && !isExpanded ? 'auto' : 'visible'};">
@@ -984,7 +991,7 @@ function createAccountRowHTML(account, isSearch) {
                     </button>
                     <button class="btn btn-secondary btn-small" onclick="editAccount('${account.id}')" title="Edit">&#9998;</button>
                     <button class="btn btn-danger btn-small" onclick="confirmDeleteAccount('${account.id}')" title="Delete">&#10005;</button>
-                    <button class="btn btn-copy btn-small" onclick="copyToClipboard('${escapeHtml(account.email)}')" title="Copy email">&#128203;</button>
+                    <button class="btn btn-copy btn-small" onclick="copyToClipboard(decodeURIComponent(this.dataset.email))" data-email="${encodeURIComponent(account.email)}" title="Copy email">&#128203;</button>
                 </div>
             </td>
         </tr>`;
@@ -1046,7 +1053,7 @@ function renderProblemAccounts() {
                 <td>
                     <div class="action-buttons">
                         <button class="btn btn-success btn-small" onclick="openProblemModal('${a.id}')">Clear</button>
-                        <button class="btn btn-copy btn-small" onclick="copyToClipboard('${escapeHtml(a.email)}')">Copy</button>
+                        <button class="btn btn-copy btn-small" onclick="copyToClipboard(decodeURIComponent(this.dataset.email))" data-email="${encodeURIComponent(a.email)}">Copy</button>
                     </div>
                 </td>
             </tr>
@@ -1381,12 +1388,13 @@ async function saveNewClient() {
 }
 
 // Modal Helpers
+let _confirmCallback = null;
+
 function showConfirmModal(message, onConfirm) {
     const modal = document.getElementById('confirmModal');
     document.getElementById('confirmMessage').textContent = message;
+    _confirmCallback = onConfirm;
     modal.style.display = 'block';
-    document.getElementById('confirmYes').onclick = () => { modal.style.display = 'none'; onConfirm(); };
-    document.getElementById('confirmNo').onclick = () => { modal.style.display = 'none'; };
 }
 
 // Event Listeners
@@ -1441,6 +1449,15 @@ document.addEventListener('DOMContentLoaded', function() {
 
     document.querySelectorAll('.close').forEach(btn => {
         btn.addEventListener('click', function() { this.closest('.modal').style.display = 'none'; });
+    });
+
+    document.getElementById('confirmYes').addEventListener('click', () => {
+        document.getElementById('confirmModal').style.display = 'none';
+        if (_confirmCallback) { _confirmCallback(); _confirmCallback = null; }
+    });
+    document.getElementById('confirmNo').addEventListener('click', () => {
+        document.getElementById('confirmModal').style.display = 'none';
+        _confirmCallback = null;
     });
 
     window.addEventListener('click', e => {
