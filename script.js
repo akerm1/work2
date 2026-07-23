@@ -20,6 +20,17 @@ let currentProblemAccountId = null;
 let currentBulkClient = null;
 let notificationInterval = null;
 let notifiedAccountIds = new Set();
+(function loadNotifiedToday() {
+    try {
+        const saved = JSON.parse(localStorage.getItem('emailOrgNotifiedIds') || '{}');
+        const todayKey = getTodayFormatted();
+        if (saved.date === todayKey) {
+            notifiedAccountIds = new Set(saved.ids || []);
+        } else {
+            localStorage.removeItem('emailOrgNotifiedIds');
+        }
+    } catch (e) { localStorage.removeItem('emailOrgNotifiedIds'); }
+})();
 let selectedAccountIds = new Set();
 let sortColumn = null;
 let sortDirection = 'asc';
@@ -224,22 +235,6 @@ function getExpiringAccounts() {
     return results;
 }
 
-function getAllExpiringAccounts() {
-    return accounts.filter(a => {
-        if (!a.date) return false;
-        const days = getDaysUntilExpiry(a.date);
-        return days !== null && days <= 30;
-    });
-}
-
-function getAllExpiredAccounts() {
-    return accounts.filter(a => {
-        if (!a.date) return false;
-        const days = getDaysUntilExpiry(a.date);
-        return days !== null && days < 0;
-    });
-}
-
 async function requestNotificationPermission() {
     if (!('Notification' in window)) return false;
     if (Notification.permission === 'granted') return true;
@@ -344,6 +339,7 @@ async function sendTestTelegram() {
 
 function resetNotificationState() {
     notifiedAccountIds.clear();
+    localStorage.setItem('emailOrgNotifiedIds', JSON.stringify({ date: getTodayFormatted(), ids: [] }));
     showMessage('Notification state reset. Reload or run checkAndNotify() to re-trigger.');
 }
 
@@ -355,6 +351,7 @@ function checkAndNotify() {
 
     newNotifs.forEach(account => {
         notifiedAccountIds.add(account.id);
+        localStorage.setItem('emailOrgNotifiedIds', JSON.stringify({ date: getTodayFormatted(), ids: [...notifiedAccountIds] }));
         let title, body;
         if (account.status === 'expired') {
             title = 'Email Account Past Due!';
@@ -1129,8 +1126,8 @@ function editAccount(id) {
 
     const clientOffset = isSearchActive ? 1 : 0;
     if (cells.length >= 5 + clientOffset) {
-        emailCell = cells[0 + clientOffset];
-        dateCell = cells[1 + clientOffset];
+        emailCell = cells[1 + clientOffset];
+        dateCell = cells[2 + clientOffset];
         actionsCell = cells[cells.length - 1];
     }
 

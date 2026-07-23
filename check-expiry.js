@@ -53,11 +53,15 @@ function getDaysUntilExpiry(dayValue) {
     if (day === null) return null;
     const today = getAlgeriaDate();
     today.setHours(0, 0, 0, 0);
-    const thisMonth = new Date(today.getFullYear(), today.getMonth(), day);
-    if (thisMonth >= today) {
-        return Math.round((thisMonth - today) / (1000 * 60 * 60 * 24));
+    const lastDayThisMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate();
+    const clampedDay = Math.min(day, lastDayThisMonth);
+    const thisMonthDate = new Date(today.getFullYear(), today.getMonth(), clampedDay);
+    if (thisMonthDate >= today) {
+        return Math.round((thisMonthDate - today) / (1000 * 60 * 60 * 24));
     }
-    const nextMonth = new Date(today.getFullYear(), today.getMonth() + 1, day);
+    const lastDayNextMonth = new Date(today.getFullYear(), today.getMonth() + 2, 0).getDate();
+    const clampedDayNext = Math.min(day, lastDayNextMonth);
+    const nextMonth = new Date(today.getFullYear(), today.getMonth() + 1, clampedDayNext);
     return Math.round((nextMonth - today) / (1000 * 60 * 60 * 24));
 }
 
@@ -189,10 +193,16 @@ async function main() {
             continue;
         }
 
+        try {
+            await markNotified(account.id, todayKey);
+        } catch (e) {
+            console.error(`Failed to mark notified for ${account.email}:`, e.message);
+            continue;
+        }
+
         const message = `<b>${title}</b>\n${body}`;
         const sent = await sendTelegramMessage(message);
         if (sent) {
-            await markNotified(account.id, todayKey);
             sentCount++;
             console.log(`Sent: ${account.email} - ${title}`);
         }
